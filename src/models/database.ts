@@ -51,6 +51,8 @@ export function initializeDatabase(): void {
       timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
       resolved BOOLEAN DEFAULT 0,
       won BOOLEAN,
+      archived BOOLEAN DEFAULT 0,
+      archive_reason TEXT,
       FOREIGN KEY (wallet_address) REFERENCES wallets(address)
     );
   `);
@@ -64,6 +66,27 @@ export function initializeDatabase(): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_wallet_trades_market 
     ON wallet_trades(market_id);
+  `);
+
+  // Migration: Add archived columns if they don't exist (for existing databases)
+  try {
+    db.exec(`ALTER TABLE wallet_trades ADD COLUMN archived BOOLEAN DEFAULT 0;`);
+    logger.info('Added archived column to wallet_trades table');
+  } catch (error) {
+    // Column already exists, ignore error
+  }
+  
+  try {
+    db.exec(`ALTER TABLE wallet_trades ADD COLUMN archive_reason TEXT;`);
+    logger.info('Added archive_reason column to wallet_trades table');
+  } catch (error) {
+    // Column already exists, ignore error
+  }
+
+  // Create index on archived column (after migration)
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_wallet_trades_archived 
+    ON wallet_trades(archived);
   `);
 
   // Paper trades table (our simulated trades)

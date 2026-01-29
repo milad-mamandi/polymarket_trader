@@ -1,6 +1,14 @@
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 
 dotenv.config();
+
+/**
+ * Generate a random secret key if not provided
+ */
+function generateRandomSecret(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
 
 export const CONFIG = {
   // Whale Detection
@@ -28,6 +36,13 @@ export const CONFIG = {
   TRADE_POLL_INTERVAL_MS: Number(process.env.TRADE_POLL_INTERVAL_MS) || 30000,
   LEADERBOARD_REFRESH_HOURS: 6,
   PROFILE_CACHE_MINUTES: 60,
+  RESOLUTION_CHECK_INTERVAL_MS: Number(process.env.RESOLUTION_CHECK_INTERVAL_MS) || 300000, // 5 minutes
+  
+  // WebSocket
+  USE_WEBSOCKET: process.env.USE_WEBSOCKET === 'true',
+  WS_RECONNECT_DELAY_MS: Number(process.env.WS_RECONNECT_DELAY_MS) || 5000,
+  WS_MAX_RECONNECT_ATTEMPTS: Number(process.env.WS_MAX_RECONNECT_ATTEMPTS) || 5,
+  WS_PING_INTERVAL_MS: Number(process.env.WS_PING_INTERVAL_MS) || 10000,
   
   // API Endpoints
   DATA_API: 'https://data-api.polymarket.com',
@@ -45,4 +60,15 @@ export const CONFIG = {
   LOG_TO_FILE: true,
   LOG_DIR: './logs',
   DATA_DIR: './data',
+  
+  // Error Handling
+  ERROR_LOG_LEVEL_422: process.env.ERROR_LOG_LEVEL_422 || 'warn',
+  MARKET_AGE_THRESHOLD_DAYS: Number(process.env.MARKET_AGE_THRESHOLD_DAYS) || 7,
+  MARK_OLD_AS_ARCHIVED: process.env.MARK_OLD_AS_ARCHIVED !== 'false',
+  
+  // Web Dashboard
+  DASHBOARD_ENABLED: process.env.DASHBOARD_ENABLED === 'true',
+  DASHBOARD_PORT: Number(process.env.DASHBOARD_PORT) || 3000,
+  DASHBOARD_PASSWORD: process.env.DASHBOARD_PASSWORD || 'admin123',
+  DASHBOARD_SESSION_SECRET: process.env.DASHBOARD_SESSION_SECRET || generateRandomSecret(),
 };

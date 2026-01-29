@@ -5,6 +5,7 @@ import { displayWhaleAlert, displayTradeExecution, displayError } from '../utils
 import { DetectedWallet } from '../services/walletScanner.js';
 import { timeAgo } from '../utils/helpers.js';
 import { tradeEngine } from '../services/tradeEngine.js';
+import { getWallet } from '../models/wallet.js';
 
 export interface AlertParams {
   type: 'whale' | 'trade' | 'error';
@@ -144,11 +145,9 @@ export class AlertSystem {
   }
 
   /**
-   * Get wallet type from address (stub - would query DB)
+   * Get wallet type from address
    */
   private getWalletTypeFromAddress(address: string): string {
-    // Import here to avoid circular dependency
-    const { getWallet } = require('../models/wallet.js');
     const wallet = getWallet(address);
     
     if (!wallet) return 'UNKNOWN';

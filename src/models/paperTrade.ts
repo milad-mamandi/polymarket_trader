@@ -10,7 +10,7 @@ export interface PaperTrade {
   virtual_amount: number;
   shares: number;
   timestamp: string;
-  status: 'OPEN' | 'CLOSED' | 'RESOLVED';
+  status: 'OPEN' | 'CLOSED' | 'WON' | 'LOST' | 'CANCELLED';
   exit_price?: number;
   pnl?: number;
   confidence_score: number;
@@ -98,13 +98,27 @@ export function resolvePaperTrade(tradeId: string, won: boolean): void {
 
   const exitPrice = won ? 1.0 : 0.0;
   const pnl = won ? (trade.shares - trade.virtual_amount) : -trade.virtual_amount;
+  const status = won ? 'WON' : 'LOST';
 
   const stmt = db.prepare(`
     UPDATE paper_trades 
-    SET status = 'RESOLVED', exit_price = ?, pnl = ?
+    SET status = ?, exit_price = ?, pnl = ?
     WHERE id = ?
   `);
-  stmt.run(exitPrice, pnl, tradeId);
+  stmt.run(status, exitPrice, pnl, tradeId);
+}
+
+/**
+ * Cancel a paper trade (when outcome is indeterminate)
+ * Returns the virtual amount to the balance
+ */
+export function cancelPaperTrade(tradeId: string, reason: string): void {
+  const stmt = db.prepare(`
+    UPDATE paper_trades 
+    SET status = 'CANCELLED', pnl = 0
+    WHERE id = ?
+  `);
+  stmt.run(tradeId);
 }
 
 /**
@@ -115,29 +129,50 @@ export function getPaperTradeStats() {
     SELECT 
       COUNT(*) as total,
       SUM(CASE WHEN status = 'OPEN' THEN 1 ELSE 0 END) as open,
-      SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) as winning,
-      SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) as losing,
+      SUM(CASE WHEN status = 'WON' THEN 1 ELSE 0 END) as winning,
+      SUM(CASE WHEN status = 'LOST' THEN 1 ELSE 0 END) as losing,
+      SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled,
       SUM(COALESCE(pnl, 0)) as total_pnl,
       AVG(COALESCE(pnl, 0)) as avg_pnl,
       MAX(COALESCE(pnl, 0)) as best_pnl,
       MIN(COALESCE(pnl, 0)) as worst_pnl
     FROM paper_trades
   `).get() as {
-    total: number;
-    open: number;
-    winning: number;
-    losing: number;
-    total_pnl: number;
-    avg_pnl: number;
-    best_pnl: number;
-    worst_pnl: number;
-  };
+    total: number | null;
+    open: number | null;
+    winning: number | null;
+    losing: number | null;
+    cancelled: number | null;
+    total_pnl: number | null;
+    avg_pnl: number | null;
+    best_pnl: number | null;
+    worst_pnl: number | null;
+  } | undefined;
 
-  const completed = stats.total - stats.open;
-  const winRate = completed > 0 ? stats.winning / completed : 0;
+  // Handle empty database or null values with nullish coalescing
+  const total = stats?.total ?? 0;
+  const open = stats?.open ?? 0;
+  const winning = stats?.winning ?? 0;
+  const losing = stats?.losing ?? 0;
+  const cancelled = stats?.cancelled ?? 0;
+  const total_pnl = stats?.total_pnl ?? 0;
+  const avg_pnl = stats?.avg_pnl ?? 0;
+  const best_pnl = stats?.best_pnl ?? 0;
+  const worst_pnl = stats?.worst_pnl ?? 0;
+
+  const completed = winning + losing;
+  const winRate = completed > 0 ? winning / completed : 0;
 
   return {
-    ...stats,
+    total,
+    open,
+    winning,
+    losing,
+    cancelled,
+    total_pnl,
+    avg_pnl,
+    best_pnl,
+    worst_pnl,
     completed,
     winRate,
   };

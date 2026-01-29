@@ -42,15 +42,22 @@ export class WalletScanner {
       // Check if this wallet is already known
       let wallet = getWallet(trade.proxyWallet);
       
-      // Get profile info if not cached
-      if (!wallet || !wallet.wallet_created_at) {
+      // Determine wallet characteristics
+      const isWhale = trade.size * trade.price >= CONFIG.WHALE_THRESHOLD_USD;
+      let isNewSuspicious = false;
+      let walletAge: number | undefined;
+      let createdAt: string | undefined;
+
+      // If wallet is known, use cached data
+      if (wallet) {
+        isNewSuspicious = wallet.is_new_suspicious;
+        createdAt = wallet.wallet_created_at || undefined;
+        if (createdAt) {
+          walletAge = walletAgeInHours(createdAt);
+        }
+      } else {
+        // New wallet - fetch profile info
         const profile = await polymarketApi.getPublicProfile(trade.proxyWallet);
-        
-        // Determine wallet characteristics
-        const isWhale = trade.size * trade.price >= CONFIG.WHALE_THRESHOLD_USD;
-        let isNewSuspicious = false;
-        let walletAge: number | undefined;
-        let createdAt: string | undefined;
 
         if (profile?.createdAt) {
           createdAt = profile.createdAt;
@@ -69,42 +76,42 @@ export class WalletScanner {
             walletAge = 1; // Assume very new
           }
         }
+      }
 
-        // Add to detected wallets if it meets our criteria
-        if (isWhale || isNewSuspicious) {
-          // First, ensure wallet exists in database before adding trades
-          upsertWallet({
-            address: trade.proxyWallet,
-            wallet_created_at: createdAt,
-            is_whale: isWhale,
-            is_new_suspicious: isNewSuspicious,
-            total_volume: trade.size * trade.price,
-            suspicion_score: 50, // Will be updated by analyzer
-          });
+      // Process all whale trades (both known and new wallets)
+      if (isWhale || isNewSuspicious) {
+        // First, ensure wallet exists in database before adding trades
+        upsertWallet({
+          address: trade.proxyWallet,
+          wallet_created_at: createdAt,
+          is_whale: isWhale,
+          is_new_suspicious: isNewSuspicious,
+          total_volume: trade.size * trade.price,
+          suspicion_score: wallet?.suspicion_score || 50, // Keep existing score or default to 50
+        });
 
-          detectedWallets.push({
-            address: trade.proxyWallet,
-            isWhale,
-            isNewSuspicious,
-            trade,
-            walletAge,
-            createdAt,
-          });
+        detectedWallets.push({
+          address: trade.proxyWallet,
+          isWhale,
+          isNewSuspicious,
+          trade,
+          walletAge,
+          createdAt,
+        });
 
-          logger.info(`Detected wallet: ${trade.proxyWallet} | Whale: ${isWhale} | New: ${isNewSuspicious} | Size: $${(trade.size * trade.price).toFixed(2)}`);
-          
-          // Now store wallet trade (wallet exists now, so FK constraint will pass)
-          insertWalletTrade({
-            id: generateId(),
-            wallet_address: trade.proxyWallet,
-            market_id: trade.conditionId,
-            market_title: trade.title,
-            outcome: trade.outcome,
-            side: trade.side,
-            size: trade.size,
-            price: trade.price,
-          });
-        }
+        logger.info(`Detected trade from ${wallet ? 'known' : 'new'} wallet: ${trade.proxyWallet} | Whale: ${isWhale} | New: ${isNewSuspicious} | Size: $${(trade.size * trade.price).toFixed(2)}`);
+        
+        // Now store wallet trade (wallet exists now, so FK constraint will pass)
+        insertWalletTrade({
+          id: generateId(),
+          wallet_address: trade.proxyWallet,
+          market_id: trade.conditionId,
+          market_title: trade.title,
+          outcome: trade.outcome,
+          side: trade.side,
+          size: trade.size,
+          price: trade.price,
+        });
       }
     }
 
@@ -152,6 +159,97 @@ export class WalletScanner {
       this.seenTrades.clear();
       logger.info('Cleared seen trades cache');
     }
+  }
+
+  /**
+   * Process a single trade (used by WebSocket integration)
+   * Returns DetectedWallet if trade is of interest, null otherwise
+   */
+  async processSingleTrade(trade: Trade): Promise<DetectedWallet | null> {
+    // Skip if we've already processed this trade
+    const tradeKey = `${trade.proxyWallet}-${trade.transactionHash}`;
+    if (this.seenTrades.has(tradeKey)) {
+      return null;
+    }
+    
+    this.seenTrades.add(tradeKey);
+
+    // Check if this wallet is already known
+    let wallet = getWallet(trade.proxyWallet);
+    
+    // Determine wallet characteristics
+    const isWhale = trade.size * trade.price >= CONFIG.WHALE_THRESHOLD_USD;
+    let isNewSuspicious = false;
+    let walletAge: number | undefined;
+    let createdAt: string | undefined;
+
+    // If wallet is known, use cached data
+    if (wallet) {
+      isNewSuspicious = wallet.is_new_suspicious;
+      createdAt = wallet.wallet_created_at || undefined;
+      if (createdAt) {
+        walletAge = walletAgeInHours(createdAt);
+      }
+    } else {
+      // New wallet - fetch profile info
+      const profile = await polymarketApi.getPublicProfile(trade.proxyWallet);
+
+      if (profile?.createdAt) {
+        createdAt = profile.createdAt;
+        walletAge = walletAgeInHours(profile.createdAt);
+        
+        // Check if wallet is newly created with large bet
+        if (walletAge <= CONFIG.NEW_WALLET_HOURS) {
+          isNewSuspicious = true;
+        }
+      } else {
+        // No profile data - check if this is their first trade on record
+        const activity = await polymarketApi.getUserActivity(trade.proxyWallet, 10);
+        if (activity.length <= 3) {
+          // Very few trades, likely new
+          isNewSuspicious = true;
+          walletAge = 1; // Assume very new
+        }
+      }
+    }
+
+    // Process if whale or suspicious
+    if (isWhale || isNewSuspicious) {
+      // Ensure wallet exists in database
+      upsertWallet({
+        address: trade.proxyWallet,
+        wallet_created_at: createdAt,
+        is_whale: isWhale,
+        is_new_suspicious: isNewSuspicious,
+        total_volume: trade.size * trade.price,
+        suspicion_score: wallet?.suspicion_score || 50,
+      });
+
+      logger.info(`Detected trade from ${wallet ? 'known' : 'new'} wallet: ${trade.proxyWallet} | Whale: ${isWhale} | New: ${isNewSuspicious} | Size: $${(trade.size * trade.price).toFixed(2)}`);
+      
+      // Store wallet trade
+      insertWalletTrade({
+        id: generateId(),
+        wallet_address: trade.proxyWallet,
+        market_id: trade.conditionId,
+        market_title: trade.title,
+        outcome: trade.outcome,
+        side: trade.side,
+        size: trade.size,
+        price: trade.price,
+      });
+
+      return {
+        address: trade.proxyWallet,
+        isWhale,
+        isNewSuspicious,
+        trade,
+        walletAge,
+        createdAt,
+      };
+    }
+
+    return null;
   }
 }
 

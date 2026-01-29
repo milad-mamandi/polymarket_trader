@@ -1,6 +1,7 @@
 // Polymarket API Response Types
 
 export interface Trade {
+  id?: string;  // Market/condition ID (may not be present in all responses)
   proxyWallet: string;
   side: 'BUY' | 'SELL';
   asset: string;
@@ -96,6 +97,7 @@ export interface Market {
   conditionId: string;
   slug: string;
   title: string;
+  question?: string;  // Alternative to title in some API responses
   description: string;
   endDate: string;
   icon: string;
@@ -109,6 +111,12 @@ export interface Market {
   resolved: boolean;
   tags: string[];
   category: string;
+  tokens?: Array<{
+    token_id: string;
+    outcome: string;
+    price: string;
+    winner?: boolean;
+  }>;
 }
 
 export interface TraderLeaderboardEntry {
@@ -125,4 +133,24 @@ export interface TraderLeaderboardEntry {
 export interface PriceData {
   price: number;
   timestamp: number;
+}
+
+export interface ClosedPosition {
+  proxyWallet: string;
+  asset: string;
+  conditionId: string;
+  avgPrice: number;
+  totalBought: number;
+  realizedPnl: number;
+  curPrice: number;
+  timestamp: number;
+  title: string;
+  slug: string;
+  icon: string;
+  eventSlug: string;
+  outcome: string;
+  outcomeIndex: number;
+  oppositeOutcome: string;
+  oppositeAsset: string;
+  endDate: string;
 }

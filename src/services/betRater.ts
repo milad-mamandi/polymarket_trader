@@ -1,6 +1,7 @@
 import { Trade, Position } from './polymarket/types.js';
 import { polymarketApi } from './polymarket/api.js';
-import { getWalletStats } from '../models/wallet.js';
+import { getWalletStats, getWallet } from '../models/wallet.js';
+import { getWalletTradesForMarket } from '../models/trade.js';
 import { CONFIG } from '../config/settings.js';
 import { logger } from '../utils/logger.js';
 
@@ -77,21 +78,31 @@ export class BetRater {
 
   /**
    * Calculate wallet reliability score (0-100)
+   * Known whales from leaderboard get bonus points
    */
   private calculateWalletScore(walletStats: any, suspicionScore: number): number {
     if (!walletStats) return suspicionScore;
 
-    const { winRate, totalTrades } = walletStats;
+    const { winRate, totalTrades, address } = walletStats;
+    
+    // Check if this is a known whale from leaderboard
+    const wallet = getWallet(address);
+    const isLeaderboardWhale = wallet?.is_whale && wallet?.total_volume > 100000;
 
-    // Combine suspicion score with historical performance
-    let score = suspicionScore * 0.5;
+    // Start with higher base score for known whales
+    let score = isLeaderboardWhale ? 70 : suspicionScore * 0.5;
 
     // Add performance component
     if (totalTrades >= 5) {
       const performanceScore = winRate * 100;
-      score += performanceScore * 0.5;
+      score = isLeaderboardWhale ? 
+        score * 0.6 + performanceScore * 0.4 :  // Known whale: performance matters less
+        suspicionScore * 0.5 + performanceScore * 0.5;  // New wallet: balance both
+    } else if (isLeaderboardWhale) {
+      // Known whale with little tracked history - still trust them
+      score = 70;
     } else {
-      // Not enough history, rely more on suspicion score
+      // Not enough history, rely on suspicion score
       score = suspicionScore;
     }
 
@@ -110,10 +121,10 @@ export class BetRater {
       }
     }
 
-    // Fetch market data
-    const market = await polymarketApi.getMarketByConditionId(conditionId);
+    // Fetch market data with debug level (expected to fail for old/archived markets)
+    const market = await polymarketApi.getMarketByConditionId(conditionId, 'debug');
     
-    if (!market) return 50; // Unknown market
+    if (!market) return 50; // Unknown market, neutral score
 
     let score = 50;
 
@@ -143,34 +154,41 @@ export class BetRater {
   /**
    * Calculate size signal (0-100)
    * Larger bets indicate higher confidence
+   * Adjusted thresholds for better scaling
    */
   private calculateSizeSignal(trade: Trade): number {
     const tradeValue = trade.size * trade.price;
 
-    // Absolute size thresholds
-    if (tradeValue > 200000) return 95;
+    // Adjusted thresholds - more generous for whale-level trades
+    if (tradeValue > 500000) return 95;
+    if (tradeValue > 200000) return 90;
     if (tradeValue > 100000) return 85;
-    if (tradeValue > 75000) return 75;
-    if (tradeValue > 50000) return 65;
-    if (tradeValue > 25000) return 55;
-    return 45;
+    if (tradeValue > 75000) return 80;
+    if (tradeValue > 50000) return 75; // Whale threshold = good score
+    if (tradeValue > 25000) return 65;
+    return 55;
   }
 
   /**
    * Calculate timing score (0-100)
    * Considers when the bet was placed relative to market lifecycle
+   * Early/bold bets on extreme odds = higher conviction
    */
   private calculateTimingScore(trade: Trade): number {
-    // Would need market end date for proper calculation
-    // For now, use trade price as proxy for timing
+    let score = 60; // Base score
     
-    // Betting at extreme prices might indicate late timing or high conviction
-    if (trade.price > 0.8 || trade.price < 0.2) {
-      return 70; // High conviction on extreme odds
+    // Betting at extreme prices indicates high conviction
+    if (trade.price > 0.9) {
+      score = 85; // Very high conviction on likely outcome
+    } else if (trade.price < 0.1) {
+      score = 90; // Very high conviction on unlikely outcome
+    } else if (trade.price > 0.75 || trade.price < 0.25) {
+      score = 75; // High conviction
+    } else if (trade.price > 0.6 || trade.price < 0.4) {
+      score = 65; // Moderate conviction
     }
     
-    // Moderate prices
-    return 60;
+    return score;
   }
 
   /**
@@ -178,10 +196,40 @@ export class BetRater {
    * Check if other whales agree with this bet
    */
   private async calculateConsensusScore(trade: Trade): Promise<number> {
-    // Get top holders for this market
-    // For now, return neutral score
-    // TODO: Implement when we track multiple whale positions
-    return 60;
+    try {
+      // Get all whale trades for this market
+      const trades = getWalletTradesForMarket(trade.conditionId);
+      
+      if (trades.length <= 1) {
+        return 60; // No consensus data, neutral score
+      }
+
+      // Count how many whales bet on the same outcome
+      const sameOutcome = trades.filter(t => 
+        t.outcome === trade.outcome && t.wallet_address !== trade.proxyWallet
+      ).length;
+
+      const totalOtherWhales = trades.filter(t => 
+        t.wallet_address !== trade.proxyWallet
+      ).length;
+
+      if (totalOtherWhales === 0) {
+        return 60; // No other whales, neutral
+      }
+
+      // Calculate consensus ratio
+      const consensusRatio = sameOutcome / totalOtherWhales;
+
+      // Convert to score
+      if (consensusRatio > 0.75) return 90; // Strong consensus
+      if (consensusRatio > 0.5) return 75;  // Majority agrees
+      if (consensusRatio > 0.25) return 60; // Some agreement
+      return 50; // Most disagree
+      
+    } catch (error) {
+      logger.error('Error calculating consensus score:', error);
+      return 60; // Default neutral score on error
+    }
   }
 
   /**

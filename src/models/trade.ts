@@ -12,6 +12,8 @@ export interface WalletTrade {
   timestamp: string;
   resolved: boolean;
   won?: boolean;
+  archived?: boolean;
+  archive_reason?: string;
 }
 
 /**
@@ -64,6 +66,30 @@ export function getRecentWalletTrades(limit = 20): WalletTrade[] {
 }
 
 /**
+ * Get all trades for a specific market (for consensus checking)
+ */
+export function getWalletTradesForMarket(marketId: string): WalletTrade[] {
+  const stmt = db.prepare(`
+    SELECT * FROM wallet_trades 
+    WHERE market_id = ?
+    ORDER BY timestamp DESC
+  `);
+  return stmt.all(marketId) as WalletTrade[];
+}
+
+/**
+ * Get unresolved trades for resolution checking (excludes archived)
+ */
+export function getUnresolvedTrades(): WalletTrade[] {
+  const stmt = db.prepare(`
+    SELECT * FROM wallet_trades 
+    WHERE resolved = 0 AND archived = 0
+    ORDER BY timestamp DESC
+  `);
+  return stmt.all() as WalletTrade[];
+}
+
+/**
  * Mark a trade as resolved
  */
 export function resolveWalletTrade(tradeId: string, won: boolean): void {
@@ -73,4 +99,56 @@ export function resolveWalletTrade(tradeId: string, won: boolean): void {
     WHERE id = ?
   `);
   stmt.run(won ? 1 : 0, tradeId);
+}
+
+/**
+ * Mark a trade as archived (market no longer available)
+ */
+export function markTradeAsArchived(tradeId: string, reason: string): void {
+  const stmt = db.prepare(`
+    UPDATE wallet_trades 
+    SET archived = 1, archive_reason = ?
+    WHERE id = ?
+  `);
+  stmt.run(reason, tradeId);
+}
+
+/**
+ * Get archived trades with their reasons
+ */
+export function getArchivedTrades(limit = 100): WalletTrade[] {
+  const stmt = db.prepare(`
+    SELECT * FROM wallet_trades 
+    WHERE archived = 1
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(limit) as WalletTrade[];
+}
+
+/**
+ * Get archived trades summary
+ */
+export function getArchivedTradesSummary() {
+  const stmt = db.prepare(`
+    SELECT 
+      archive_reason,
+      COUNT(*) as count,
+      MIN(timestamp) as oldest,
+      MAX(timestamp) as newest
+    FROM wallet_trades 
+    WHERE archived = 1
+    GROUP BY archive_reason
+  `);
+  return stmt.all();
+}
+
+/**
+ * Get age of a trade in days
+ */
+export function getTradeAge(trade: WalletTrade): number {
+  const tradeDate = new Date(trade.timestamp);
+  const now = new Date();
+  const diffMs = now.getTime() - tradeDate.getTime();
+  return diffMs / (1000 * 60 * 60 * 24); // Convert to days
 }

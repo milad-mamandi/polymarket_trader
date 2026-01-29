@@ -5,6 +5,7 @@ import { CONFIG } from '../config/settings.js';
 import { logger, logTrade } from '../utils/logger.js';
 import { generateId, formatUSD, timeAgo, truncateAddress } from '../utils/helpers.js';
 import { getWalletStats } from '../models/wallet.js';
+import { getWebSocketManager } from '../index.js';
 
 export interface PaperTradeResult {
   executed: boolean;
@@ -30,9 +31,14 @@ export class TradeEngine {
 
     // Calculate current balance from existing trades
     const stats = getPaperTradeStats();
-    this.paperBalance = CONFIG.INITIAL_PAPER_BALANCE + stats.total_pnl;
+    const openTrades = getOpenPaperTrades();
+    const lockedCapital = openTrades.reduce((sum, t) => sum + t.virtual_amount, 0);
+    
+    // Correct formula: Initial balance + PnL from resolved trades - capital locked in open positions
+    // This ensures that when the bot restarts, open positions are properly accounted for
+    this.paperBalance = CONFIG.INITIAL_PAPER_BALANCE + stats.total_pnl - lockedCapital;
 
-    logger.info(`Trade engine initialized. Current balance: ${formatUSD(this.paperBalance)}`);
+    logger.info(`Trade engine initialized. Balance: ${formatUSD(this.paperBalance)}, Locked: ${formatUSD(lockedCapital)}, Open positions: ${openTrades.length}`);
     this.initialized = true;
   }
 
@@ -115,6 +121,30 @@ export class TradeEngine {
 
     logger.info(`✓ Paper trade executed: ${truncateAddress(rating.walletAddress)} | ${trade.outcome} @ ${trade.price} | ${formatUSD(positionSize)}`);
 
+    // Broadcast new trade to WebSocket clients
+    try {
+      const wsManager = getWebSocketManager();
+      if (wsManager) {
+        wsManager.sendNewTrade({
+          id: tradeId,
+          wallet: rating.walletAddress,
+          market: trade.title,
+          outcome: trade.outcome,
+          price: trade.price,
+          amount: positionSize,
+          shares,
+          confidence: rating.finalScore,
+          timestamp: Date.now(),
+        });
+        
+        // Also send updated portfolio
+        wsManager.sendPortfolioUpdate(this.getPortfolioStatus());
+      }
+    } catch (error) {
+      // Silently fail if dashboard is not running
+      logger.debug('WebSocket broadcast skipped (dashboard not running)');
+    }
+
     return {
       executed: true,
       tradeId,
@@ -169,6 +199,25 @@ export class TradeEngine {
   private ensureInitialized(): void {
     if (!this.initialized) {
       this.initialize();
+    }
+  }
+
+  /**
+   * Update balance (used when resolving trades)
+   */
+  updateBalance(amount: number): void {
+    this.paperBalance += amount;
+    logger.info(`Balance updated: ${amount >= 0 ? '+' : ''}${formatUSD(amount)} | New balance: ${formatUSD(this.paperBalance)}`);
+    
+    // Broadcast portfolio update to WebSocket clients
+    try {
+      const wsManager = getWebSocketManager();
+      if (wsManager) {
+        wsManager.sendPortfolioUpdate(this.getPortfolioStatus());
+      }
+    } catch (error) {
+      // Silently fail if dashboard is not running
+      logger.debug('WebSocket broadcast skipped (dashboard not running)');
     }
   }
 

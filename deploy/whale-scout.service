@@ -1,0 +1,30 @@
+[Unit]
+Description=Polymarket Whale Scout Bot
+After=network.target
+
+[Service]
+Type=simple
+User=whale-scout
+Group=whale-scout
+WorkingDirectory=/opt/whale-scout
+Environment="NODE_ENV=production"
+ExecStart=/usr/bin/node /opt/whale-scout/dist/cli/index.js start
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whale-scout
+
+# Resource limits
+LimitNOFILE=65536
+MemoryLimit=512M
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/whale-scout/data /opt/whale-scout/logs
+
+[Install]
+WantedBy=multi-user.target

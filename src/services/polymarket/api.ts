@@ -9,6 +9,7 @@ import {
   Market,
   TraderLeaderboardEntry,
   PriceData,
+  ClosedPosition,
 } from './types.js';
 
 /**
@@ -111,6 +112,29 @@ export class PolymarketAPI {
   }
 
   /**
+   * Get user's closed positions (resolved markets with realized P&L)
+   * This is useful for checking if a market has been resolved when the /markets endpoint returns 422
+   */
+  async getClosedPositions(address: string, conditionId?: string): Promise<ClosedPosition[]> {
+    try {
+      const params: any = {
+        user: address,
+        limit: 50,
+      };
+      
+      if (conditionId) {
+        params.market = conditionId;
+      }
+      
+      const response = await this.dataApi.get<ClosedPosition[]>('/closed-positions', { params });
+      return response.data;
+    } catch (error) {
+      logAxiosError(`Error fetching closed positions for ${address}`, error);
+      return [];
+    }
+  }
+
+  /**
    * Get user's activity/trade history
    */
   async getUserActivity(address: string, limit = 100): Promise<Activity[]> {
@@ -157,11 +181,35 @@ export class PolymarketAPI {
   /**
    * Get market details by condition ID
    */
-  async getMarketByConditionId(conditionId: string): Promise<Market | null> {
+  async getMarketByConditionId(conditionId: string, logLevel?: string): Promise<Market | null> {
     try {
       const response = await this.gammaApi.get<Market>(`/markets/${conditionId}`);
       return response.data;
     } catch (error) {
+      // Handle 422 with configurable log level (market likely resolved/archived)
+      if (axios.isAxiosError(error) && error.response?.status === 422) {
+        const level = logLevel || CONFIG.ERROR_LOG_LEVEL_422;
+        const message = `Market ${conditionId} unavailable (likely resolved/archived)`;
+        
+        switch(level) {
+          case 'error':
+            logger.error(message);
+            break;
+          case 'warn':
+            logger.warn(message);
+            break;
+          case 'info':
+            logger.info(message);
+            break;
+          case 'debug':
+            logger.debug(message);
+            break;
+        }
+        
+        return null;
+      }
+      
+      // Log other errors normally
       logAxiosError(`Error fetching market ${conditionId}`, error);
       return null;
     }
@@ -233,6 +281,34 @@ export class PolymarketAPI {
     } catch (error) {
       logAxiosError(`Error searching for "${query}"`, error);
       return null;
+    }
+  }
+
+  /**
+   * Get top markets by volume for WebSocket subscription
+   * Returns asset IDs (token IDs) to subscribe to
+   */
+  async getTopMarketAssetIds(limit = 50): Promise<string[]> {
+    try {
+      const markets = await this.getMarkets(limit, 0);
+      const assetIds: string[] = [];
+
+      for (const market of markets) {
+        if (market.tokens && Array.isArray(market.tokens)) {
+          // Add all token IDs from the market
+          market.tokens.forEach((token: any) => {
+            if (token.token_id) {
+              assetIds.push(token.token_id);
+            }
+          });
+        }
+      }
+
+      logger.info(`Found ${assetIds.length} asset IDs from ${markets.length} markets for WebSocket subscription`);
+      return assetIds;
+    } catch (error) {
+      logAxiosError('Error fetching top market asset IDs', error);
+      return [];
     }
   }
 }
