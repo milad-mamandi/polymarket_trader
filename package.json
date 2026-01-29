@@ -1,0 +1,39 @@
+{
+  "name": "polymarket-whale-scout",
+  "version": "1.0.0",
+  "description": "A bot to scout whales and suspicious wallets on Polymarket with paper trading",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "polymarket",
+    "whale",
+    "trading",
+    "prediction-markets"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.5",
+    "better-sqlite3": "^11.7.0",
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.3",
+    "dotenv": "^16.4.1",
+    "ora": "^8.0.1",
+    "telegraf": "^4.15.6",
+    "winston": "^3.11.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/node": "^20.11.5",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
