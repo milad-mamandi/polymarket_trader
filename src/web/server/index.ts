@@ -14,6 +14,7 @@ import { WebSocketManager } from './websocket.js';
 import authRoutes from './routes/auth.js';
 import apiRoutes from './routes/api.js';
 import controlRoutes from './routes/controls.js';
+import configRoutes from './routes/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,20 +53,13 @@ export class DashboardServer {
       credentials: true,
     }));
     
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // Limit each IP to 100 requests per windowMs
-      message: 'Too many requests from this IP',
-    });
-    
+    // Rate limiting - only on login endpoint to prevent brute force
     const authLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
+      windowMs: 15 * 60 * 1000, // 15 minutes
       max: 5, // 5 login attempts per 15 minutes
       message: 'Too many login attempts',
     });
     
-    this.app.use('/api/', limiter);
     this.app.use('/api/auth/login', authLimiter);
     
     // Body parsing
@@ -99,6 +93,7 @@ export class DashboardServer {
     this.app.use('/api/auth', authRoutes);
     this.app.use('/api', apiRoutes);
     this.app.use('/api/bot', controlRoutes);
+    this.app.use('/api/config', configRoutes);
     
     // Serve static files (React build)
     // When running from dist/, we need to go back to project root and into src

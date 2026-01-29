@@ -13,13 +13,6 @@ import { getOpenPaperTrades, resolvePaperTrade, cancelPaperTrade } from '../mode
 import { polymarketApi } from '../services/polymarket/api.js';
 import { polymarketWS } from '../services/polymarket/wsClient.js';
 import { WSLastTradePrice, WSMarketResolved } from '../services/polymarket/wsTypes.js';
-import { 
-  displayHeader, 
-  displayWatchedWallets, 
-  displayRecentSignals, 
-  displayPortfolio,
-  displayInfo,
-} from '../utils/display.js';
 import { getWebSocketManager } from '../index.js';
 
 /**
@@ -52,7 +45,7 @@ export class Monitor {
 
     // Seed initial whales from leaderboard
     try {
-      displayInfo('Seeding initial whales from leaderboard...');
+      logger.info('Seeding initial whales from leaderboard...');
       await walletScanner.seedFromLeaderboard();
     } catch (error) {
       logger.error('Failed to seed leaderboard:', error);
@@ -65,9 +58,6 @@ export class Monitor {
 
     // Start main loop (REST API polling or WebSocket processing)
     this.mainLoop();
-
-    // Start display loop
-    this.displayLoop();
 
     // Start daily metrics updater
     this.metricsLoop();
@@ -98,7 +88,7 @@ export class Monitor {
       logger.info('Initializing WebSocket connection...');
       
       // Fetch top markets to subscribe to
-      displayInfo('Fetching top markets for WebSocket subscription...');
+      logger.info('Fetching top markets for WebSocket subscription...');
       const assetIds = await polymarketApi.getTopMarketAssetIds(50);
       
       if (assetIds.length === 0) {
@@ -113,12 +103,12 @@ export class Monitor {
       this.setupWebSocketHandlers();
       
       logger.info(`WebSocket initialized and subscribed to ${assetIds.length} assets`);
-      displayInfo(`✅ WebSocket: Monitoring ${assetIds.length} top markets in real-time`);
+      logger.info(`WebSocket: Monitoring ${assetIds.length} top markets in real-time`);
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to initialize WebSocket: ${errorMessage}. Falling back to REST API polling.`);
-      displayInfo('⚠️  WebSocket failed - using REST API polling');
+      logger.info('WebSocket failed - using REST API polling');
     }
   }
 
@@ -144,7 +134,7 @@ export class Monitor {
     // Handle disconnection
     polymarketWS.on('disconnected', () => {
       logger.warn('WebSocket disconnected after max reconnection attempts');
-      displayInfo('⚠️  WebSocket disconnected - using REST API polling');
+      logger.info('WebSocket disconnected - using REST API polling');
     });
   }
 
@@ -218,7 +208,7 @@ export class Monitor {
       }
 
       if (resolvedCount > 0) {
-        displayInfo(`📊 Market resolved: ${resolvedCount} trades updated`);
+        logger.info(`Market resolved: ${resolvedCount} trades updated`);
       }
       
     } catch (error) {
@@ -410,34 +400,6 @@ export class Monitor {
     }
 
     return detectedWallets;
-  }
-
-  /**
-   * Display update loop
-   */
-  private async displayLoop(): Promise<void> {
-    while (this.running) {
-      try {
-        this.updateDisplay();
-        await sleep(5000); // Update display every 5 seconds
-      } catch (error) {
-        logger.error('Error updating display:', error);
-      }
-    }
-  }
-
-  /**
-   * Update terminal display
-   */
-  private updateDisplay(): void {
-    const uptime = this.getUptime();
-    const wallets = getAllWatchedWallets();
-    const portfolio = tradeEngine.getPortfolioStatus();
-
-    displayHeader(uptime);
-    displayWatchedWallets(wallets);
-    displayRecentSignals(this.recentSignals);
-    displayPortfolio(portfolio);
   }
 
   /**

@@ -2,6 +2,16 @@
 
 A sophisticated CLI tool with web dashboard that scouts for whale activity and suspicious new wallets on Polymarket, rates their bets, and executes paper trades based on confidence scores.
 
+## 🎉 Recent Updates (v2.0)
+
+### January 2026 - Dashboard Modernization
+- ✅ **Reset Functionality**: One-click reset for paper trading data in Settings page
+- ✅ **React Query + Axios**: Modern data fetching with automatic refetching (10s intervals)
+- ✅ **Better Performance**: Optimized data loading and caching
+- 🚧 **Real Trading Infrastructure**: Foundation for real trading mode (in progress)
+
+See [TODO.md](TODO.md) for remaining tasks and implementation details.
+
 ## Features
 
 - **🐋 Whale Detection**: Automatically detects trades over $50,000
@@ -26,11 +36,14 @@ A sophisticated CLI tool with web dashboard that scouts for whale activity and s
   - `config` - Interactive configuration editor
   - `reset` - Database management tools
   - `dashboard` - Web dashboard interface
-- **🌐 Web Dashboard**: Real-time web interface
+- **🌐 Web Dashboard**: Modern React-based web interface
   - Live portfolio tracking with WebSocket updates
   - Interactive charts and statistics
   - Trade and wallet management
   - Bot controls (start/stop/restart)
+  - **🔄 One-Click Reset**: Reset paper trading data with confirmation dialog
+  - **⚡ React Query + Axios**: Auto-refetching data every 10 seconds
+  - **🎯 Real Trading Ready**: Infrastructure for real trading mode (coming soon)
   - Password-protected access
 - **📱 Multi-channel Alerts**: Notifications via console, file logs, and Telegram
 - **🚀 Production-Ready**: systemd service and deployment scripts included
@@ -148,6 +161,8 @@ whale-scout dashboard -p 8080
 - 👛 **Wallet Monitoring** - Track watched wallets with scores
 - 🎮 **Bot Controls** - Start, stop, and restart the monitoring bot
 - 🔄 **WebSocket Updates** - Instant updates for new trades, resolutions, and whale detections
+- 🗑️ **One-Click Reset** - Clear paper trading data with confirmation dialog
+- ⚡ **Auto-Refresh** - Data automatically refetches every 10 seconds using React Query
 - 🔒 **Password Protection** - Secure access with session-based authentication
 
 **Dashboard Configuration** (in `.env`):
@@ -916,6 +931,9 @@ poly/
 
 - [x] ~~WebSocket integration for real-time updates~~ ✅ **Implemented**
 - [x] ~~Web dashboard with charts~~ ✅ **Implemented**
+- [x] ~~React Query + Axios for modern data fetching~~ ✅ **Implemented (50%)**
+- [x] ~~One-click reset functionality~~ ✅ **Implemented**
+- [ ] **Real trading mode with Polymarket CLOB integration** 🚧 **In Progress**
 - [ ] Machine learning for improved scoring
 - [ ] Advanced consensus detection
 - [ ] Backtesting framework with historical data
@@ -923,7 +941,6 @@ poly/
 - [ ] Multi-market support beyond Polymarket
 - [ ] Alert customization (filter by confidence, wallet type)
 - [ ] Risk management tools (stop-loss, take-profit)
-- [ ] Real trading mode (with proper wallet integration and safety limits)
 - [ ] Mobile app (React Native)
 - [ ] Multi-user dashboard with role-based access
 - [ ] Historical data analysis and pattern recognition

@@ -46,14 +46,12 @@ export class WebSocketManager {
    * Handle new WebSocket connection
    */
   private handleConnection(socket: WebSocket, request: any) {
-    logger.info('New WebSocket connection attempt');
-    
     // Verify authentication via session cookie
     const cookies = this.parseCookies(request.headers.cookie || '');
     const sessionId = cookies.sessionId;
     
     if (!sessionId || !getSession(sessionId)) {
-      logger.warn('Unauthorized WebSocket connection attempt');
+      logger.debug('Unauthorized WebSocket connection attempt');
       socket.close(1008, 'Unauthorized');
       return;
     }
@@ -80,7 +78,7 @@ export class WebSocketManager {
         const message = JSON.parse(data.toString()) as WSMessage;
         this.handleMessage(client, message);
       } catch (error) {
-        logger.error('Invalid WebSocket message');
+        logger.debug('Invalid WebSocket message');
       }
     });
     
@@ -92,8 +90,7 @@ export class WebSocketManager {
     
     // Handle errors
     socket.on('error', (error) => {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`WebSocket error: ${errorMessage}`);
+      logger.debug(`WebSocket client error: ${error instanceof Error ? error.message : String(error)}`);
       this.clients.delete(client);
     });
   }

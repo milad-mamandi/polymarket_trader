@@ -1,110 +1,142 @@
+import axios, { AxiosInstance, AxiosError } from 'axios';
+
 // API base URL
 const API_BASE = '/api';
 
+// Create axios instance with default config
+const axiosInstance: AxiosInstance = axios.create({
+  baseURL: API_BASE,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Response interceptor for error handling
+axiosInstance.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    let errorMessage = `HTTP ${error.response?.status || 'Error'}: ${error.message}`;
+    
+    if (error.response?.data) {
+      const data = error.response.data as any;
+      errorMessage = data.error || data.message || errorMessage;
+    }
+    
+    return Promise.reject(new Error(errorMessage));
+  }
+);
+
 // API client
 class ApiClient {
-  async request(endpoint: string, options: RequestInit = {}) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-
-  if (!response.ok) {
-    let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-    try {
-      const error = await response.json();
-      errorMessage = error.error || error.message || errorMessage;
-    } catch {
-      // Response wasn't JSON, use default error message
-    }
-    throw new Error(errorMessage);
-  }
-
-    return response.json();
-  }
-
   // Auth
   async login(password: string) {
-    return this.request('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ password }),
-    });
+    const { data } = await axiosInstance.post('/auth/login', { password });
+    return data;
   }
 
   async logout() {
-    return this.request('/auth/logout', { method: 'POST' });
+    const { data } = await axiosInstance.post('/auth/logout');
+    return data;
   }
 
   async checkAuth() {
-    return this.request('/auth/check');
+    const { data } = await axiosInstance.get('/auth/check');
+    return data;
   }
 
   // Stats
   async getOverview() {
-    return this.request('/stats/overview');
+    const { data } = await axiosInstance.get('/stats/overview');
+    return data;
   }
 
   async getPerformance(days = 30) {
-    return this.request(`/stats/performance?days=${days}`);
+    const { data } = await axiosInstance.get(`/stats/performance?days=${days}`);
+    return data;
   }
 
   async getDailyStats() {
-    return this.request('/stats/daily');
+    const { data } = await axiosInstance.get('/stats/daily');
+    return data;
   }
 
   // Trades
   async getTrades(params: { limit?: number; status?: string } = {}) {
-    const query = new URLSearchParams();
-    if (params.limit) query.set('limit', params.limit.toString());
-    if (params.status) query.set('status', params.status);
-    return this.request(`/trades?${query}`);
+    const queryParams = new URLSearchParams();
+    if (params.limit) queryParams.set('limit', params.limit.toString());
+    if (params.status) queryParams.set('status', params.status);
+    const { data } = await axiosInstance.get(`/trades?${queryParams}`);
+    return data;
   }
 
   async getTrade(id: string) {
-    return this.request(`/trades/${id}`);
+    const { data } = await axiosInstance.get(`/trades/${id}`);
+    return data;
   }
 
   async getTradeStats() {
-    return this.request('/trades/stats');
+    const { data } = await axiosInstance.get('/trades/stats');
+    return data;
   }
 
   // Wallets
   async getWallets() {
-    return this.request('/wallets');
+    const { data } = await axiosInstance.get('/wallets');
+    return data;
   }
 
   async getWallet(address: string) {
-    return this.request(`/wallets/${address}`);
+    const { data } = await axiosInstance.get(`/wallets/${address}`);
+    return data;
   }
 
   async getWalletStats() {
-    return this.request('/wallets/stats');
+    const { data } = await axiosInstance.get('/wallets/stats');
+    return data;
   }
 
   // Activity
   async getRecentActivity(limit = 20) {
-    return this.request(`/activity/recent?limit=${limit}`);
+    const { data } = await axiosInstance.get(`/activity/recent?limit=${limit}`);
+    return data;
   }
 
   // Bot controls
   async getBotStatus() {
-    return this.request('/bot/status');
+    const { data } = await axiosInstance.get('/bot/status');
+    return data;
   }
 
   async startBot() {
-    return this.request('/bot/start', { method: 'POST' });
+    const { data } = await axiosInstance.post('/bot/start');
+    return data;
   }
 
   async stopBot() {
-    return this.request('/bot/stop', { method: 'POST' });
+    const { data } = await axiosInstance.post('/bot/stop');
+    return data;
   }
 
   async restartBot() {
-    return this.request('/bot/restart', { method: 'POST' });
+    const { data } = await axiosInstance.post('/bot/restart');
+    return data;
+  }
+
+  async resetData() {
+    const { data } = await axiosInstance.post('/bot/reset');
+    return data;
+  }
+
+  // Config
+  async getConfig() {
+    const { data } = await axiosInstance.get('/config');
+    return data;
+  }
+
+  async updateConfig(updates: Record<string, any>) {
+    const { data } = await axiosInstance.put('/config', updates);
+    return data;
   }
 }
 

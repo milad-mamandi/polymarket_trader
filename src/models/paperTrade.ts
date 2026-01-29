@@ -10,6 +10,7 @@ export interface PaperTrade {
   virtual_amount: number;
   shares: number;
   timestamp: string;
+  detected_at?: string;
   status: 'OPEN' | 'CLOSED' | 'WON' | 'LOST' | 'CANCELLED';
   exit_price?: number;
   pnl?: number;
@@ -35,8 +36,8 @@ export function insertPaperTrade(trade: PaperTradeInsert): void {
   const stmt = db.prepare(`
     INSERT INTO paper_trades (
       id, triggered_by, market_id, market_title, outcome, 
-      entry_price, virtual_amount, shares, confidence_score
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      entry_price, virtual_amount, shares, confidence_score, detected_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
   `);
 
   stmt.run(

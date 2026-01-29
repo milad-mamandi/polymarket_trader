@@ -1,7 +1,6 @@
 import { BetRating } from '../services/betRater.js';
 import { telegramService } from '../services/telegram.js';
 import { logger } from '../utils/logger.js';
-import { displayWhaleAlert, displayTradeExecution, displayError } from '../utils/display.js';
 import { DetectedWallet } from '../services/walletScanner.js';
 import { timeAgo } from '../utils/helpers.js';
 import { tradeEngine } from '../services/tradeEngine.js';
@@ -39,17 +38,6 @@ export class AlertSystem {
     // Store alert
     this.addAlert('whale', alertData);
 
-    // Console display
-    displayWhaleAlert({
-      wallet: alertData.wallet,
-      walletType: alertData.walletType,
-      score: alertData.suspicionScore,
-      market: alertData.market,
-      outcome: alertData.outcome,
-      price: alertData.price,
-      size: alertData.size,
-    });
-
     // Telegram notification
     await telegramService.sendWhaleAlert(alertData);
 
@@ -78,9 +66,6 @@ export class AlertSystem {
     // Store alert
     this.addAlert('trade', alertData);
 
-    // Console display
-    displayTradeExecution(alertData);
-
     // Telegram notification
     await telegramService.sendTradeAlert(alertData);
 
@@ -96,9 +81,6 @@ export class AlertSystem {
 
     // Store alert
     this.addAlert('error', { message: errorMsg });
-
-    // Console display
-    displayError(errorMsg);
 
     // Telegram notification
     await telegramService.sendError(errorMsg);

@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { logger } from '../../../utils/logger.js';
 import { monitor } from '../../../index.js';
+import { resetTradingData } from '../../../models/database.js';
+import { tradeEngine } from '../../../services/tradeEngine.js';
 
 const router = Router();
 
@@ -153,6 +155,31 @@ router.post('/restart', async (req: Request, res: Response) => {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`Error restarting bot: ${errorMessage}`);
     res.status(500).json({ error: 'Failed to restart bot' });
+  }
+});
+
+/**
+ * POST /api/bot/reset
+ * Reset all trading data (paper trades and performance history)
+ */
+router.post('/reset', async (req: Request, res: Response) => {
+  try {
+    logger.info('Resetting trading data via dashboard...');
+    
+    // Reset database (clears paper_trades and performance tables)
+    resetTradingData();
+    
+    // Reset trade engine balance to initial value
+    tradeEngine.reset();
+    
+    res.json({ 
+      success: true, 
+      message: 'Trading data reset successfully. All paper trades and performance history cleared.',
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error resetting data: ${errorMessage}`);
+    res.status(500).json({ error: 'Failed to reset trading data' });
   }
 });
 

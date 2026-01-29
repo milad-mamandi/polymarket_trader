@@ -120,6 +120,22 @@ export function initializeDatabase(): void {
     ON paper_trades(market_id);
   `);
 
+  // Migration: Add detected_at column to paper_trades if it doesn't exist
+  try {
+    const tableInfo = db.pragma('table_info(paper_trades)') as Array<{ name: string }>;
+    const hasDetectedAt = tableInfo.some(col => col.name === 'detected_at');
+    
+    if (!hasDetectedAt) {
+      // Note: SQLite doesn't allow non-constant defaults in ALTER TABLE
+      // New rows will get timestamp from insertPaperTrade(), existing rows get NULL
+      db.exec('ALTER TABLE paper_trades ADD COLUMN detected_at DATETIME');
+      logger.info('Migration: Added detected_at column to paper_trades table');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Migration error for detected_at: ${errorMessage}`);
+  }
+
   // Performance metrics table
   db.exec(`
     CREATE TABLE IF NOT EXISTS performance (
@@ -177,4 +193,28 @@ export function getDatabaseStats() {
 export function clearOldCache(hoursOld = 24): void {
   const cutoff = new Date(Date.now() - hoursOld * 60 * 60 * 1000).toISOString();
   db.prepare('DELETE FROM market_cache WHERE cached_at < ?').run(cutoff);
+}
+
+/**
+ * Reset all trading data (paper trades and performance history)
+ * Preserves detected wallets and their trades for reference
+ */
+export function resetTradingData(): void {
+  logger.info('Resetting trading data...');
+  
+  try {
+    // Delete all paper trades
+    const paperTradesDeleted = db.prepare('DELETE FROM paper_trades').run();
+    logger.info(`Deleted ${paperTradesDeleted.changes} paper trades`);
+    
+    // Delete all performance history
+    const performanceDeleted = db.prepare('DELETE FROM performance').run();
+    logger.info(`Deleted ${performanceDeleted.changes} performance records`);
+    
+    logger.info('Trading data reset successfully');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to reset trading data: ${errorMessage}`);
+    throw error;
+  }
 }
