@@ -63,8 +63,35 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/data"
 mkdir -p "$INSTALL_DIR/logs"
 
+# Validate build artifacts exist
+echo -e "\n${BLUE}Validating build artifacts...${NC}"
+if [ ! -d "dist" ]; then
+    echo -e "${RED}❌ Error: Backend 'dist' directory not found!${NC}"
+    echo -e "${YELLOW}   The backend must be built before installing.${NC}"
+    echo -e "${YELLOW}   Run these commands first:${NC}"
+    echo -e "${YELLOW}     npm install${NC}"
+    echo -e "${YELLOW}     npm run build${NC}"
+    echo -e "${YELLOW}   Or use the automated deployment script:${NC}"
+    echo -e "${YELLOW}     sudo bash deploy/deploy.sh${NC}"
+    exit 1
+fi
+
+if [ ! -d "src/web/client/dist" ]; then
+    echo -e "${YELLOW}⚠  Warning: Frontend 'src/web/client/dist' not found${NC}"
+    echo -e "${YELLOW}   Dashboard will not be available. To build it, run:${NC}"
+    echo -e "${YELLOW}     cd src/web/client && npm install && npm run build${NC}"
+    echo -e "${YELLOW}   Continue installation without dashboard? (y/n)${NC}"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo -e "${RED}Installation cancelled.${NC}"
+        exit 1
+    fi
+fi
+
+echo -e "${GREEN}✓ Build artifacts validated${NC}"
+
 # Copy files
-echo -e "${BLUE}Copying files...${NC}"
+echo -e "\n${BLUE}Copying files...${NC}"
 cp -r dist "$INSTALL_DIR/"
 cp -r node_modules "$INSTALL_DIR/"
 cp package.json "$INSTALL_DIR/"
