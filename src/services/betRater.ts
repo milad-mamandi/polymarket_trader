@@ -83,7 +83,7 @@ export class BetRater {
   private calculateWalletScore(walletStats: any, suspicionScore: number): number {
     if (!walletStats) return suspicionScore;
 
-    const { winRate, totalTrades, address } = walletStats;
+    const { winRate, total_trades, address } = walletStats;
     
     // Check if this is a known whale from leaderboard
     const wallet = getWallet(address);
@@ -93,7 +93,7 @@ export class BetRater {
     let score = isLeaderboardWhale ? 70 : suspicionScore * 0.5;
 
     // Add performance component
-    if (totalTrades >= 5) {
+    if (total_trades >= 5) {
       const performanceScore = winRate * 100;
       score = isLeaderboardWhale ? 
         score * 0.6 + performanceScore * 0.4 :  // Known whale: performance matters less

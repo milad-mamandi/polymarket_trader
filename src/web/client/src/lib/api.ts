@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import type { ConfigUpdatePayload, ClosePositionRequest, ClosePositionResponse } from './types';
 
 // API base URL
 const API_BASE = '/api';
@@ -19,7 +20,7 @@ axiosInstance.interceptors.response.use(
     let errorMessage = `HTTP ${error.response?.status || 'Error'}: ${error.message}`;
     
     if (error.response?.data) {
-      const data = error.response.data as any;
+      const data = error.response.data as { error?: string; message?: string };
       errorMessage = data.error || data.message || errorMessage;
     }
     
@@ -134,8 +135,38 @@ class ApiClient {
     return data;
   }
 
-  async updateConfig(updates: Record<string, any>) {
+  async updateConfig(updates: ConfigUpdatePayload) {
     const { data } = await axiosInstance.put('/config', updates);
+    return data;
+  }
+
+  // Orders
+  async getOrders(params: { limit?: number; type?: 'paper' | 'real' | 'all'; status?: string } = {}) {
+    const queryParams = new URLSearchParams();
+    if (params.limit) queryParams.set('limit', params.limit.toString());
+    if (params.type) queryParams.set('type', params.type);
+    if (params.status) queryParams.set('status', params.status);
+    const { data } = await axiosInstance.get(`/orders?${queryParams}`);
+    return data;
+  }
+
+  async getOrder(id: string) {
+    const { data } = await axiosInstance.get(`/orders/${id}`);
+    return data;
+  }
+
+  async getOrderStats() {
+    const { data } = await axiosInstance.get('/orders/stats');
+    return data;
+  }
+
+  async cancelOrder(id: string) {
+    const { data } = await axiosInstance.post(`/orders/${id}/cancel`);
+    return data;
+  }
+
+  async closePosition(id: string, request: ClosePositionRequest): Promise<ClosePositionResponse> {
+    const { data } = await axiosInstance.post(`/orders/${id}/close`, request);
     return data;
   }
 }

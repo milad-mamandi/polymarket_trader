@@ -26,12 +26,25 @@ function generateSessionId(): string {
 }
 
 /**
- * Verify password
+ * Check if a string is a bcrypt hash
+ */
+function isBcryptHash(str: string): boolean {
+  return str.startsWith('$2a$') || str.startsWith('$2b$') || str.startsWith('$2y$');
+}
+
+/**
+ * Verify password - supports both hashed and plain text
  */
 export async function verifyPassword(password: string): Promise<boolean> {
-  // For simple password, just compare directly
-  // In production, you'd hash this and store the hash
-  return password === CONFIG.DASHBOARD_PASSWORD;
+  const stored = CONFIG.DASHBOARD_PASSWORD;
+  
+  // Check if stored password is a bcrypt hash
+  if (isBcryptHash(stored)) {
+    return await bcrypt.compare(password, stored);
+  }
+  
+  // Fallback for plain text passwords (backward compatible)
+  return password === stored;
 }
 
 /**

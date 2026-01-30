@@ -128,7 +128,7 @@ export class WalletAnalyzer {
    * Higher win rate = more credible
    */
   private calculateWinRateScore(stats: any): number {
-    if (!stats || stats.totalTrades < 3) return 50; // Not enough data
+    if (!stats || stats.total_trades < 3) return 50; // Not enough data
 
     const winRate = stats.winRate;
 

@@ -1,44 +1,30 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import { formatPercent, formatNumber, timeAgo } from '../lib/utils';
+import { useState } from 'react';
+import { formatPercent, formatNumber, timeAgo, safeToFixed } from '../lib/utils';
 import { Search, X, ExternalLink, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { useWallets, useWallet } from '../hooks/useQueries';
 import type { Wallet, Trade } from '../lib/types';
 
 export function Wallets() {
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use React Query hook for data fetching
+  const { data, isLoading, error: queryError } = useWallets();
+  const wallets = data?.wallets || [];
+  
   const [selectedWallet, setSelectedWallet] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Sorting
+  // Sorting (local UI state)
   const [sortBy, setSortBy] = useState<'trades' | 'winRate' | 'volume' | 'recent'>('trades');
 
-  useEffect(() => {
-    loadWallets();
-  }, []);
-
-  async function loadWallets() {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await api.getWallets();
-      setWallets(data.wallets || []); // Extract wallets array from response
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load wallets');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const error = queryError ? (queryError instanceof Error ? queryError.message : 'Failed to load wallets') : null;
 
   // Filter and sort wallets
   const filteredWallets = wallets
-    .filter(wallet => {
+    .filter((wallet: Wallet) => {
       if (!searchQuery) return true;
       const query = searchQuery.toLowerCase();
       return wallet.address.toLowerCase().includes(query);
     })
-    .sort((a, b) => {
+    .sort((a: Wallet, b: Wallet) => {
       switch (sortBy) {
         case 'trades':
           return b.total_trades - a.total_trades;
@@ -53,7 +39,7 @@ export function Wallets() {
       }
     });
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -106,7 +92,7 @@ export function Wallets() {
             <label className="block text-sm text-slate-400 mb-2">Sort By</label>
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
+              onChange={(e) => setSortBy(e.target.value as 'trades' | 'winRate' | 'volume' | 'recent')}
               className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
             >
               <option value="trades">Most Trades</option>
@@ -125,7 +111,7 @@ export function Wallets() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredWallets.map((wallet) => (
+          {filteredWallets.map((wallet: Wallet) => (
             <WalletCard
               key={wallet.address}
               wallet={wallet}
@@ -196,7 +182,7 @@ function WalletCard({ wallet, onClick }: { wallet: Wallet; onClick: () => void }
 
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-400">Score</span>
-          <span className="text-white font-semibold">{wallet.suspicion_score.toFixed(1)}</span>
+          <span className="text-white font-semibold">{safeToFixed(wallet.suspicion_score, 1)}</span>
         </div>
 
         <div className="flex items-center justify-between">
@@ -209,28 +195,12 @@ function WalletCard({ wallet, onClick }: { wallet: Wallet; onClick: () => void }
 }
 
 function WalletModal({ address, onClose }: { address: string; onClose: () => void }) {
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadWalletDetails();
-  }, [address]);
-
-  async function loadWalletDetails() {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await api.getWallet(address);
-      setWallet(data.wallet);
-      setTrades(data.trades || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load wallet details');
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Use React Query hook for fetching wallet details
+  const { data, isLoading, error: queryError } = useWallet(address);
+  
+  const wallet = data?.wallet || null;
+  const trades = data?.trades || [];
+  const error = queryError ? (queryError instanceof Error ? queryError.message : 'Failed to load wallet details') : null;
 
   const walletUrl = `https://polygonscan.com/address/${address}`;
   const badges = [];
@@ -270,7 +240,7 @@ function WalletModal({ address, onClose }: { address: string; onClose: () => voi
 
         {/* Content */}
         <div className="p-6">
-          {loading ? (
+          {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
@@ -311,7 +281,7 @@ function WalletModal({ address, onClose }: { address: string; onClose: () => voi
 
               {/* More Info */}
               <div className="grid grid-cols-2 gap-4">
-                <InfoItem label="Suspicion Score" value={wallet.suspicion_score.toFixed(1)} />
+                <InfoItem label="Suspicion Score" value={safeToFixed(wallet.suspicion_score, 1)} />
                 <InfoItem label="First Seen" value={timeAgo(wallet.first_seen)} />
                 <InfoItem label="Last Seen" value={timeAgo(wallet.last_seen)} />
                 {wallet.total_volume && (
@@ -335,7 +305,7 @@ function WalletModal({ address, onClose }: { address: string; onClose: () => voi
                 <div>
                   <h3 className="text-lg font-semibold text-white mb-3">Trade History ({trades.length})</h3>
                   <div className="space-y-2 max-h-96 overflow-y-auto">
-                    {trades.map((trade) => (
+                    {trades.map((trade: Trade) => (
                       <TradeRow key={trade.id} trade={trade} />
                     ))}
                   </div>
@@ -389,7 +359,7 @@ function TradeRow({ trade }: { trade: Trade }) {
         <div className="flex items-center gap-3">
           {trade.pnl !== null && (
             <span className={trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
-              {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+              {trade.pnl >= 0 ? '+' : ''}${safeToFixed(trade.pnl, 2)}
             </span>
           )}
           <span className="text-slate-500">{timeAgo(trade.timestamp)}</span>

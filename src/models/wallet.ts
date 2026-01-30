@@ -26,17 +26,18 @@ export interface WalletInsert {
  * Insert or update a wallet
  */
 export function upsertWallet(wallet: WalletInsert): void {
+  const now = new Date().toISOString();
   const stmt = db.prepare(`
     INSERT INTO wallets (
       address, wallet_created_at, is_whale, is_new_suspicious, 
-      total_volume, suspicion_score, last_updated
-    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      total_volume, suspicion_score, first_seen, last_updated
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(address) DO UPDATE SET
       is_whale = excluded.is_whale,
       is_new_suspicious = excluded.is_new_suspicious,
       total_volume = excluded.total_volume,
       suspicion_score = excluded.suspicion_score,
-      last_updated = CURRENT_TIMESTAMP
+      last_updated = excluded.last_updated
   `);
 
   stmt.run(
@@ -45,7 +46,9 @@ export function upsertWallet(wallet: WalletInsert): void {
     wallet.is_whale ? 1 : 0,
     wallet.is_new_suspicious ? 1 : 0,
     wallet.total_volume,
-    wallet.suspicion_score
+    wallet.suspicion_score,
+    now,
+    now
   );
 }
 
@@ -89,10 +92,10 @@ export function updateWalletRecord(address: string, won: boolean): void {
   const field = won ? 'win_count' : 'loss_count';
   const stmt = db.prepare(`
     UPDATE wallets 
-    SET ${field} = ${field} + 1, last_updated = CURRENT_TIMESTAMP
+    SET ${field} = ${field} + 1, last_updated = ?
     WHERE address = ?
   `);
-  stmt.run(address);
+  stmt.run(new Date().toISOString(), address);
 }
 
 /**
@@ -102,12 +105,12 @@ export function getWalletStats(address: string) {
   const wallet = getWallet(address);
   if (!wallet) return null;
 
-  const totalTrades = wallet.win_count + wallet.loss_count;
-  const winRate = totalTrades > 0 ? wallet.win_count / totalTrades : 0;
+  const total_trades = wallet.win_count + wallet.loss_count;
+  const winRate = total_trades > 0 ? wallet.win_count / total_trades : 0;
 
   return {
     ...wallet,
-    totalTrades,
+    total_trades,
     winRate,
   };
 }

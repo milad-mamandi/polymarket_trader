@@ -1,22 +1,25 @@
 import { Link, useLocation } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import { 
   LayoutDashboard, 
   Activity, 
   TrendingUp, 
   Wallet, 
-  Settings 
+  Settings,
+  ListOrdered 
 } from 'lucide-react';
 
 interface NavItem {
   name: string;
   path: string;
-  icon: any;
+  icon: LucideIcon;
 }
 
 const navigation: NavItem[] = [
   { name: 'Overview', path: '/', icon: LayoutDashboard },
   { name: 'Activity', path: '/activity', icon: Activity },
   { name: 'Trades', path: '/trades', icon: TrendingUp },
+  { name: 'Orders', path: '/orders', icon: ListOrdered },
   { name: 'Wallets', path: '/wallets', icon: Wallet },
   { name: 'Settings', path: '/settings', icon: Settings },
 ];

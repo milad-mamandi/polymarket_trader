@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { CONFIG } from '../../../config/settings.js';
 import { logger } from '../../../utils/logger.js';
+import { getKillSwitchStatus, activateKillSwitch, deactivateKillSwitch } from '../../../core/killSwitch.js';
+import { getSafetyStatus } from '../../../services/realTradeExecutor.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -36,6 +38,24 @@ const EDITABLE_CONFIG = [
   { key: 'TELEGRAM_ENABLED', type: 'boolean', category: 'Notifications', description: 'Enable Telegram notifications' },
   { key: 'TELEGRAM_BOT_TOKEN', type: 'string', category: 'Notifications', description: 'Telegram bot API token', secret: true },
   { key: 'TELEGRAM_CHAT_ID', type: 'string', category: 'Notifications', description: 'Telegram chat ID for notifications' },
+  
+  // Real Trading Mode
+  { key: 'TRADING_MODE', type: 'select', category: 'Real Trading', description: 'Trading mode', options: ['paper', 'real'] },
+  { key: 'REAL_TRADING_PRIVATE_KEY', type: 'string', category: 'Real Trading', description: 'Ethereum private key for CLOB authentication', secret: true },
+  { key: 'REAL_TRADING_FUNDER_ADDRESS', type: 'string', category: 'Real Trading', description: 'Polymarket proxy wallet address' },
+  { key: 'REAL_TRADING_SIGNATURE_TYPE', type: 'number', category: 'Real Trading', description: 'Signature type (0=EOA, 1=Magic, 2=Gnosis)', min: 0, max: 2 },
+  
+  // Real Trading Safety Limits
+  { key: 'REAL_TRADING_MAX_POSITION_USD', type: 'number', category: 'Safety Limits', description: 'Maximum position size per trade (USD)', min: 10, max: 100000 },
+  { key: 'REAL_TRADING_DAILY_LIMIT_USD', type: 'number', category: 'Safety Limits', description: 'Maximum total spending per day (USD)', min: 100, max: 1000000 },
+  { key: 'REAL_TRADING_START_HOUR', type: 'number', category: 'Safety Limits', description: 'Trading start hour (UTC, 0-23)', min: 0, max: 23 },
+  { key: 'REAL_TRADING_END_HOUR', type: 'number', category: 'Safety Limits', description: 'Trading end hour (UTC, 0-23)', min: 0, max: 23 },
+  
+  // Extra Safety
+  { key: 'REAL_TRADING_MIN_SHARES', type: 'number', category: 'Extra Safety', description: 'Minimum shares per order', min: 0.1, max: 100 },
+  { key: 'REAL_TRADING_MAX_SLIPPAGE_PERCENT', type: 'number', category: 'Extra Safety', description: 'Maximum slippage tolerance (%)', min: 0, max: 20 },
+  { key: 'REAL_TRADING_CONFIRMATION_DELAY_MS', type: 'number', category: 'Extra Safety', description: 'Delay before trade execution (ms, 0=instant)', min: 0, max: 300000 },
+  { key: 'REAL_TRADING_DRY_RUN', type: 'boolean', category: 'Extra Safety', description: 'Dry run mode - log trades without executing' },
 ];
 
 /**
@@ -52,7 +72,7 @@ router.get('/', (req: Request, res: Response) => {
       // Mask secret values
       if (item.secret && value) {
         config[item.key] = {
-          value: '***' + value.slice(-4),
+          value: value.length > 8 ? '***' + value.slice(-4) : '***',
           masked: true,
           ...item
         };
@@ -65,7 +85,17 @@ router.get('/', (req: Request, res: Response) => {
       }
     }
     
-    res.json({ config });
+    // Add kill switch status
+    const killSwitchStatus = getKillSwitchStatus();
+    
+    // Add safety status
+    const safetyStatus = getSafetyStatus();
+    
+    res.json({ 
+      config,
+      killSwitch: killSwitchStatus,
+      safetyStatus
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`Error fetching config: ${errorMessage}`);
@@ -120,12 +150,27 @@ router.put('/', async (req: Request, res: Response) => {
           continue;
         }
         validatedUpdates[key] = String(value);
+      } else if (configItem.type === 'select') {
+        const options = (configItem as any).options || [];
+        if (!options.includes(value)) {
+          errors[key] = `Must be one of: ${options.join(', ')}`;
+          continue;
+        }
+        validatedUpdates[key] = String(value);
       } else if (configItem.type === 'string') {
         if (typeof value !== 'string') {
           errors[key] = 'Must be a string';
           continue;
         }
         validatedUpdates[key] = value;
+      }
+    }
+    
+    // Validation: Don't allow enabling real mode without credentials
+    if (validatedUpdates['TRADING_MODE'] === 'real') {
+      const privateKey = validatedUpdates['REAL_TRADING_PRIVATE_KEY'] || CONFIG.REAL_TRADING_PRIVATE_KEY;
+      if (!privateKey || privateKey.length < 32) {
+        errors['TRADING_MODE'] = 'Cannot enable real trading without valid private key';
       }
     }
     
@@ -170,6 +215,50 @@ router.put('/', async (req: Request, res: Response) => {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`Error updating config: ${errorMessage}`);
     res.status(500).json({ error: 'Failed to update configuration' });
+  }
+});
+
+/**
+ * POST /api/config/killswitch/activate
+ * Activate emergency kill switch
+ */
+router.post('/killswitch/activate', async (req: Request, res: Response) => {
+  try {
+    const { reason } = req.body;
+    
+    await activateKillSwitch(reason || 'Manual activation via dashboard');
+    
+    logger.warn('Kill switch activated via dashboard');
+    
+    res.json({ 
+      success: true, 
+      message: 'Kill switch activated. All open orders cancelled and trading disabled.' 
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error activating kill switch: ${errorMessage}`);
+    res.status(500).json({ error: 'Failed to activate kill switch' });
+  }
+});
+
+/**
+ * POST /api/config/killswitch/deactivate
+ * Deactivate kill switch
+ */
+router.post('/killswitch/deactivate', (req: Request, res: Response) => {
+  try {
+    deactivateKillSwitch();
+    
+    logger.info('Kill switch deactivated via dashboard');
+    
+    res.json({ 
+      success: true, 
+      message: 'Kill switch deactivated. Trading can be re-enabled via configuration.' 
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Error deactivating kill switch: ${errorMessage}`);
+    res.status(500).json({ error: 'Failed to deactivate kill switch' });
   }
 });
 

@@ -22,8 +22,8 @@ export interface WalletTrade {
 export function insertWalletTrade(trade: Omit<WalletTrade, 'timestamp' | 'resolved'>): void {
   const stmt = db.prepare(`
     INSERT INTO wallet_trades (
-      id, wallet_address, market_id, market_title, outcome, side, size, price
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, wallet_address, market_id, market_title, outcome, side, size, price, timestamp
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -34,7 +34,8 @@ export function insertWalletTrade(trade: Omit<WalletTrade, 'timestamp' | 'resolv
     trade.outcome,
     trade.side,
     trade.size,
-    trade.price
+    trade.price,
+    new Date().toISOString()
   );
 }
 

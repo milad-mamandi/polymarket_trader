@@ -1,0 +1,55 @@
+
+> polymarket-whale-scout@2.0.0 test
+> cross-env NODE_OPTIONS=--experimental-vm-modules jest
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ✅ audit secrets and track compliance: https://dotenvx.com/ops
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+[2026-01-31 01:52:40] [31MERROR[39M: Failed to initialize CLOB client: REAL_TRADING_PRIVATE_KEY is required for real trading 
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ⚙️  override existing env vars with { override: true }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ⚙️  enable debug logging with { debug: true }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+
+  console.log
+    [dotenv@17.2.3] injecting env (24) from .env -- tip: ⚙️  write to custom object with { processEnv: myObject }
+
+      at _log (node_modules/dotenv/lib/main.js:142:11)
+

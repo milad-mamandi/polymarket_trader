@@ -10,6 +10,7 @@ import { Settings } from './pages/Settings';
 import { Trades } from './pages/Trades';
 import { Wallets } from './pages/Wallets';
 import { Activity } from './pages/Activity';
+import { Orders } from './pages/Orders';
 import { ToastProvider } from './components/ToastProvider';
 
 function App() {
@@ -51,6 +52,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/trades" element={<Trades />} />
+              <Route path="/orders" element={<Orders />} />
               <Route path="/wallets" element={<Wallets />} />
               <Route path="/activity" element={<Activity />} />
               <Route path="/settings" element={<Settings />} />

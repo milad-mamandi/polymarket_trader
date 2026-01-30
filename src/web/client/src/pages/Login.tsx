@@ -18,8 +18,9 @@ export function Login({ onLogin }: LoginProps) {
     try {
       await api.login(password);
       onLogin();
-    } catch (err: any) {
-      setError(err.message || 'Login failed');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Login failed';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

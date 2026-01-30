@@ -8,7 +8,7 @@ import { URL } from 'url';
  * WebSocket message types
  */
 export interface WSMessage {
-  type: 'portfolio' | 'trade:new' | 'trade:resolved' | 'whale:detected' | 'bot:status' | 'ping' | 'pong';
+  type: 'portfolio' | 'trade:new' | 'trade:resolved' | 'whale:detected' | 'bot:status' | 'order:status_changed' | 'order:filled' | 'order:partial_fill' | 'ping' | 'pong';
   data?: any;
   timestamp?: number;
 }
@@ -198,6 +198,36 @@ export class WebSocketManager {
   public sendBotStatus(data: any) {
     this.broadcast({
       type: 'bot:status',
+      data,
+    });
+  }
+
+  /**
+   * Send order status changed notification
+   */
+  public sendOrderStatusChanged(data: any) {
+    this.broadcast({
+      type: 'order:status_changed',
+      data,
+    });
+  }
+
+  /**
+   * Send order filled notification
+   */
+  public sendOrderFilled(data: any) {
+    this.broadcast({
+      type: 'order:filled',
+      data,
+    });
+  }
+
+  /**
+   * Send order partial fill notification
+   */
+  public sendOrderPartialFill(data: any) {
+    this.broadcast({
+      type: 'order:partial_fill',
       data,
     });
   }

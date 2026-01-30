@@ -6,35 +6,25 @@ This file contains coding standards, build commands, and conventions for AI agen
 
 ## Build & Run Commands
 
-### Development
 ```bash
-npm run dev          # Run with tsx (hot reload)
-npm run build        # Compile TypeScript to dist/
-npm run start        # Run compiled code
-npm run clean        # Remove dist/ folder
-```
+# Development
+npm run dev              # Run with tsx (hot reload)
+npm run build            # Compile TypeScript to dist/
+npm start                # Run compiled code
 
-### Testing
-```bash
-# No formal test suite yet - use manual testing:
-npm run dev          # Run for 30-60 seconds and verify output
-./test.sh            # 60-second test run with database verification
-```
+# Web Dashboard
+npm run build:client     # Build frontend (in src/web/client)
 
-### Database Operations
-```bash
-# View data
+# Testing
+npm run dev              # Manual testing (run 30-60s and verify)
+
+# Database
 sqlite3 data/whale_bot.db "SELECT * FROM wallets LIMIT 10;"
-sqlite3 data/whale_bot.db "SELECT * FROM wallet_trades LIMIT 10;"
+rm -rf data/ logs/       # Reset database
 
-# Reset database
-rm -rf data/ logs/ && npm run dev
-```
-
-### Debugging
-```bash
-tail -f logs/app.log              # Watch logs in real-time
-grep ERROR logs/app.log           # Find errors
+# Debugging
+tail -f logs/app.log     # Watch logs
+grep ERROR logs/app.log  # Find errors
 ```
 
 ---
@@ -42,75 +32,38 @@ grep ERROR logs/app.log           # Find errors
 ## Code Style Guidelines
 
 ### Language & Module System
-- **TypeScript** with strict mode enabled
-- **ES Modules** (`.js` extension in imports required)
-- Target: ES2022
-- Node.js v18+ required
+- **TypeScript** with strict mode, ES Modules, ES2022 target, Node.js v18+
+- **CRITICAL**: Always use `.js` extension for local imports (even for `.ts` files)
 
-### Imports
-**Always use `.js` extension for local imports** (even for `.ts` files):
 ```typescript
 // ✅ Correct
 import { logger } from '../utils/logger.js';
 import { Trade } from './polymarket/types.js';
-
-// ❌ Wrong
-import { logger } from '../utils/logger';
-import { Trade } from './polymarket/types.ts';
-```
-
-**Import order**:
-1. External packages (axios, winston, etc.)
-2. Internal modules (relative imports)
-3. Types (if separate)
-
-**Example**:
-```typescript
-import axios from 'axios';
-import winston from 'winston';
-import { polymarketApi } from './polymarket/api.js';
-import { Trade, Position } from './polymarket/types.js';
 ```
 
 ### Naming Conventions
-- **Files**: camelCase (`walletScanner.ts`, `betRater.ts`)
-- **Classes**: PascalCase (`WalletScanner`, `AlertSystem`)
-- **Functions/variables**: camelCase (`scanForWhales`, `isWhale`)
-- **Constants**: UPPER_SNAKE_CASE (`WHALE_THRESHOLD_USD`, `LOG_LEVEL`)
-- **Interfaces/Types**: PascalCase (`Trade`, `DetectedWallet`)
-- **Database fields**: snake_case (`wallet_address`, `is_whale`)
+| Type | Convention | Example |
+|------|------------|---------|
+| Files | camelCase | `walletScanner.ts` |
+| Classes | PascalCase | `WalletScanner` |
+| Functions/Variables | camelCase | `scanForWhales` |
+| Constants | UPPER_SNAKE_CASE | `WHALE_THRESHOLD_USD` |
+| Interfaces/Types | PascalCase | `Trade`, `DetectedWallet` |
+| Database Fields | snake_case | `wallet_address` |
 
 ### TypeScript Types
-- **Always use explicit types** for function parameters and return values
-- **Use interfaces** for object shapes
-- **Use type** for unions, intersections, or type aliases
-- **Avoid `any`** - use `unknown` if type is truly unknown
+- Always use explicit types for function parameters and return values
+- Use `interface` for object shapes, `type` for unions/aliases
+- Avoid `any` - use `unknown` if type is truly unknown
 
-**Example**:
-```typescript
-// ✅ Good
-export interface DetectedWallet {
-  address: string;
-  isWhale: boolean;
-  trade: Trade;
-  walletAge?: number;
-}
+---
 
-async function scanForWhales(): Promise<DetectedWallet[]> {
-  // ...
-}
-
-// ❌ Bad
-async function scanForWhales() {
-  return [];
-}
-```
+## Critical Patterns
 
 ### Error Handling
 
 **CRITICAL**: Avoid circular reference errors in logging!
 
-**Safe error logging pattern**:
 ```typescript
 try {
   // code
@@ -119,7 +72,7 @@ try {
   const errorMessage = error instanceof Error ? error.message : String(error);
   logger.error(`Context: ${errorMessage}`);
   
-  // ✅ For Axios errors, use helper
+  // ✅ For Axios errors
   if (axios.isAxiosError(error)) {
     logger.error('API Error', {
       status: error.response?.status,
@@ -128,161 +81,130 @@ try {
     });
   }
   
-  // ❌ NEVER log entire error object directly
+  // ❌ NEVER log entire error object
   // logger.error('Error:', error); // BAD - causes circular ref!
 }
 ```
 
-**Never log**:
-- Full Axios error objects (contain circular refs)
-- Full Error objects with all properties
-- Objects that may contain HTTP request/response
+**Never log**: Full Axios error objects, full Error objects, objects with HTTP request/response
 
 ### Database Operations
 
 **CRITICAL**: Always `upsertWallet()` BEFORE inserting trades!
 
-**Correct pattern**:
 ```typescript
-// ✅ Good - wallet exists before trade insert
-upsertWallet({
-  address: wallet.address,
-  is_whale: true,
-  // ...
-});
+// ✅ Correct - wallet exists before trade insert
+upsertWallet({ address: wallet.address, is_whale: true });
+insertWalletTrade({ wallet_address: wallet.address, market_id: trade.id });
 
-insertWalletTrade({
-  wallet_address: wallet.address,  // FK constraint satisfied
-  market_id: trade.id,
-  // ...
-});
-
-// ❌ Bad - will fail with FK constraint error
-insertWalletTrade({
-  wallet_address: wallet.address,  // Wallet doesn't exist yet!
-  market_id: trade.id,
-});
+// ❌ Wrong - FK constraint error
+insertWalletTrade({ wallet_address: wallet.address }); // Wallet doesn't exist!
 ```
 
-### Async/Await
-- **Always use async/await** (no raw Promises or callbacks)
-- **Always handle errors** with try-catch
-- **Never use `.catch()` chains** - use try-catch instead
+### Polymarket Token Resolution
 
-**Example**:
+**CRITICAL**: Understand token ID vs condition ID distinction!
+
+- **Condition ID**: Market identifier (e.g., `0x123abc...`)
+- **Token ID**: Outcome-specific token (YES token, NO token)
+- Markets have 2+ tokens (binary markets: YES + NO)
+
 ```typescript
-// ✅ Good
-async function fetchData(): Promise<Trade[]> {
-  try {
-    const response = await api.getTrades();
-    return response.data;
-  } catch (error) {
-    logger.error('Failed to fetch trades');
-    return [];
-  }
-}
+// ✅ Get token ID for placing orders
+const market = await polymarketApi.getMarketByConditionId(conditionId);
+const tokenId = outcome === 'YES' 
+  ? market.tokens[0].token_id 
+  : market.tokens[1].token_id;
 
-// ❌ Bad
-function fetchData() {
-  return api.getTrades()
-    .then(res => res.data)
-    .catch(err => console.log(err));
-}
+// ✅ Or use token resolver
+import { resolveTokenId } from './polymarket/tokenResolver.js';
+const tokenId = await resolveTokenId(conditionId, 'YES');
 ```
 
-### Logging
-- Use `logger.info()` for normal operations
-- Use `logger.error()` for errors (with safe error extraction)
-- Use `logger.warn()` for warnings
-- Use `logger.debug()` for verbose debugging (respects LOG_LEVEL)
+### WebSocket Patterns
 
-### Comments & Documentation
-- Use JSDoc comments for exported functions/classes
-- Include `@param` and `@returns` where helpful
-- Keep comments concise and meaningful
+**CRITICAL**: Avoid circular references in WebSocket messages!
 
-**Example**:
 ```typescript
-/**
- * Scan for large trades and detect whales/suspicious wallets
- * @returns Array of detected wallet addresses with trade info
- */
-async scanForWhales(): Promise<DetectedWallet[]> {
-  // Implementation
-}
+// ✅ Serialize only necessary fields
+wsManager.broadcast({
+  type: 'order:status_changed',
+  data: { orderId: order.id, status: order.status, timestamp: new Date().toISOString() }
+});
+
+// ❌ Full objects may contain circular refs
+wsManager.broadcast({ type: 'order:update', data: fullOrderObject });
 ```
 
-### Configuration
-- All config in `.env` file and `src/config/settings.ts`
-- Never hardcode values like thresholds, intervals, API URLs
-- Use `CONFIG.CONSTANT_NAME` pattern
+**Event Types**: `portfolio`, `trade:new`, `trade:resolved`, `whale:detected`, `bot:status`, `order:status_changed`, `order:filled`, `order:partial_fill`
 
 ---
 
 ## Architecture Patterns
 
-### Service Layer (`src/services/`)
-- Business logic and API calls
-- Exported as singleton instances: `export const serviceName = new ServiceClass();`
-- No direct database access (use models)
-
-### Model Layer (`src/models/`)
-- Database CRUD operations only
-- Pure functions - no business logic
-- Export functions, not classes
-
-### Core Layer (`src/core/`)
-- Orchestration (monitor, alerts, performance tracking)
-- Coordinates services and models
-
-### Utils (`src/utils/`)
-- Pure utility functions
-- No side effects
-- Reusable across project
+- **Service Layer** (`src/services/`) - Business logic and API calls, exported as singletons, no direct DB access
+- **Model Layer** (`src/models/`) - Database CRUD operations only, pure functions, export functions not classes
+- **Core Layer** (`src/core/`) - Orchestration (monitor, alerts, performance tracking), includes kill switch
+- **Utils** (`src/utils/`) - Pure utility functions, no side effects
+- **Web Layer** (`src/web/`) - Express.js backend + React frontend (Vite + TypeScript + Tailwind CSS)
 
 ---
 
 ## Common Pitfalls to Avoid
 
-1. **❌ Forgetting `.js` extension** in imports (causes module not found errors)
-2. **❌ Logging full error objects** (causes circular reference errors)
-3. **❌ Inserting trades before wallets** (causes FK constraint errors)
-4. **❌ Using `any` type** (defeats purpose of TypeScript)
-5. **❌ Hardcoding config values** (use CONFIG or .env)
-6. **❌ Not handling API errors** (always try-catch async operations)
-7. **❌ Raw SQL without prepared statements** (always use `db.prepare()`)
+1. ❌ Forgetting `.js` extension in imports (causes module not found errors)
+2. ❌ Logging full error objects (causes circular reference errors)
+3. ❌ Inserting trades before wallets (causes FK constraint errors)
+4. ❌ Using `any` type (defeats purpose of TypeScript)
+5. ❌ Hardcoding config values (use CONFIG or .env)
+6. ❌ Not handling API errors (always try-catch async operations)
+7. ❌ Raw SQL without prepared statements (always use `db.prepare()`)
+8. ❌ Confusing token ID with condition ID (use tokenResolver for CLOB orders)
+9. ❌ Broadcasting full objects via WebSocket (causes circular refs - extract fields)
+10. ❌ Not checking TRADING_MODE before executing real trades
+11. ❌ Forgetting to build client (`npm run build:client` required for dashboard)
 
 ---
 
-## File Organization
+## API Documentation & References
 
-```
-src/
-├── index.ts                   # Entry point
-├── config/
-│   └── settings.ts           # Load .env and export CONFIG
-├── services/
-│   ├── polymarket/
-│   │   ├── api.ts            # API client with error handling
-│   │   └── types.ts          # TypeScript interfaces
-│   ├── walletScanner.ts      # Whale detection
-│   ├── walletAnalyzer.ts     # Scoring algorithm
-│   ├── betRater.ts           # Confidence rating
-│   └── tradeEngine.ts        # Paper trading logic
-├── models/
-│   ├── database.ts           # DB initialization
-│   ├── wallet.ts             # Wallet CRUD
-│   ├── trade.ts              # Trade CRUD
-│   └── performance.ts        # Performance metrics CRUD
-├── core/
-│   ├── monitor.ts            # Main loop
-│   ├── alertSystem.ts        # Multi-channel alerts
-│   └── performanceTracker.ts # Analytics
-└── utils/
-    ├── logger.ts             # Winston logger with circular ref handler
-    ├── helpers.ts            # Utility functions
-    └── display.ts            # Terminal UI
-```
+### Polymarket APIs
+- **Data API Documentation**: https://docs.polymarket.com/
+- **CLOB Client SDK (GitHub)**: https://github.com/Polymarket/clob-client
+- **CLOB API Endpoint**: https://clob.polymarket.com/
+- **Gamma Markets API**: https://gamma-api.polymarket.com/
+- **CLOB API Specification**: https://docs.polymarket.com/#clob-api
+
+### Key API Endpoints
+
+#### Data API (gamma-api.polymarket.com)
+- `GET /trades` - Fetch recent trades with filters (CASH/CASH_AMOUNT/VOLUME)
+- `GET /public-profile?address={wallet}` - Get wallet profile and creation date
+- `GET /positions?user={wallet}` - Fetch wallet positions
+- `GET /activity?user={wallet}` - Get wallet trading history
+- `GET /markets?condition_id={id}` - Get market details by condition ID
+- `GET /closed-positions?market={id}` - Fallback for archived market resolution
+- `GET /v1/leaderboard` - Get top traders by volume/PnL
+
+#### CLOB API (clob.polymarket.com)
+- `POST /order` - Place limit/market orders (requires signature)
+- `GET /order/{orderId}` - Get order status
+- `DELETE /order/{orderId}` - Cancel order
+- `GET /orders?market={id}` - Get all orders for market
+- `GET /balance` - Get wallet balance
+
+### Libraries & Documentation
+- **React Query (TanStack Query)**: https://tanstack.com/query/latest
+- **Axios HTTP Client**: https://axios-http.com/docs/intro
+- **Ethers.js v5**: https://docs.ethers.org/v5/
+- **Winston Logger**: https://github.com/winstonjs/winston
+- **Better-SQLite3**: https://github.com/WiseLibs/better-sqlite3
+
+### Blockchain References
+- **Polygon Network**: https://polygon.technology/ (Chain ID: 137 mainnet, 80001 Mumbai testnet)
+- **Polygon RPC**: https://polygon-rpc.com/
+- **Polygonscan**: https://polygonscan.com/
+- **USDC on Polygon**: 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174
 
 ---
 
@@ -290,15 +212,22 @@ src/
 
 **Start coding**:
 1. Read relevant files first
-2. Follow naming conventions
-3. Use `.js` in imports
-4. Extract error messages before logging
-5. Upsert wallet before inserting trades
-6. Test with `npm run dev`
-7. Check logs for errors: `tail -f logs/app.log`
+2. Follow naming conventions (camelCase files, `.js` imports)
+3. Extract error messages before logging (avoid circular refs)
+4. Upsert wallet before inserting trades (FK constraints)
+5. Check TRADING_MODE before real trades
+6. Use tokenResolver for token IDs (not condition IDs)
+7. Test with `npm run dev`
+8. Check logs: `tail -f logs/app.log`
 
-**When in doubt**: Look at existing code patterns in `src/services/walletScanner.ts` or `src/services/polymarket/api.ts` for reference.
+**Key Reference Files**:
+- Error handling: `src/utils/logger.ts`
+- API calls: `src/services/polymarket/api.ts`
+- Database patterns: `src/models/wallet.ts`
+- WebSocket: `src/web/server/websocket.ts`
+- Real trading safety: `src/services/realTradeExecutor.ts`
+- Token resolution: `src/services/polymarket/tokenResolver.ts`
 
 ---
 
-*Last Updated: January 29, 2026*
+*Last Updated: January 31, 2026*

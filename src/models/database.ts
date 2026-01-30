@@ -120,6 +120,49 @@ export function initializeDatabase(): void {
     ON paper_trades(market_id);
   `);
 
+  // Real trades table (actual on-chain trades)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS real_trades (
+      id TEXT PRIMARY KEY,
+      triggered_by TEXT NOT NULL,
+      market_id TEXT NOT NULL,
+      token_id TEXT NOT NULL,
+      market_title TEXT,
+      outcome TEXT,
+      order_id TEXT,
+      order_type TEXT,
+      entry_price REAL,
+      amount_usd REAL,
+      shares REAL,
+      fee_paid REAL,
+      transaction_hash TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+      status TEXT DEFAULT 'OPEN',
+      exit_price REAL,
+      exit_order_id TEXT,
+      exit_transaction_hash TEXT,
+      pnl REAL,
+      confidence_score REAL,
+      FOREIGN KEY (triggered_by) REFERENCES wallets(address)
+    );
+  `);
+
+  // Create index on real_trades
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_real_trades_status 
+    ON real_trades(status);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_real_trades_market 
+    ON real_trades(market_id);
+  `);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_real_trades_order_id 
+    ON real_trades(order_id);
+  `);
+
   // Migration: Add detected_at column to paper_trades if it doesn't exist
   try {
     const tableInfo = db.pragma('table_info(paper_trades)') as Array<{ name: string }>;
@@ -176,14 +219,18 @@ export function getDatabaseStats() {
     wallets: db.prepare('SELECT COUNT(*) as count FROM wallets').get() as { count: number },
     walletTrades: db.prepare('SELECT COUNT(*) as count FROM wallet_trades').get() as { count: number },
     paperTrades: db.prepare('SELECT COUNT(*) as count FROM paper_trades').get() as { count: number },
-    openTrades: db.prepare("SELECT COUNT(*) as count FROM paper_trades WHERE status = 'OPEN'").get() as { count: number },
+    openPaperTrades: db.prepare("SELECT COUNT(*) as count FROM paper_trades WHERE status = 'OPEN'").get() as { count: number },
+    realTrades: db.prepare('SELECT COUNT(*) as count FROM real_trades').get() as { count: number },
+    openRealTrades: db.prepare("SELECT COUNT(*) as count FROM real_trades WHERE status = 'OPEN'").get() as { count: number },
   };
 
   return {
     totalWallets: stats.wallets.count,
     totalWalletTrades: stats.walletTrades.count,
     totalPaperTrades: stats.paperTrades.count,
-    openPaperTrades: stats.openTrades.count,
+    openPaperTrades: stats.openPaperTrades.count,
+    totalRealTrades: stats.realTrades.count,
+    openRealTrades: stats.openRealTrades.count,
   };
 }
 
@@ -206,6 +253,10 @@ export function resetTradingData(): void {
     // Delete all paper trades
     const paperTradesDeleted = db.prepare('DELETE FROM paper_trades').run();
     logger.info(`Deleted ${paperTradesDeleted.changes} paper trades`);
+    
+    // Delete all real trades
+    const realTradesDeleted = db.prepare('DELETE FROM real_trades').run();
+    logger.info(`Deleted ${realTradesDeleted.changes} real trades`);
     
     // Delete all performance history
     const performanceDeleted = db.prepare('DELETE FROM performance').run();

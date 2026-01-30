@@ -1,42 +1,26 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import { formatUSD, formatPercent, timeAgo } from '../lib/utils';
+import { useState } from 'react';
+import { formatUSD, formatPercent, timeAgo, safeToFixed } from '../lib/utils';
 import { Filter, Download, X, ExternalLink, TrendingUp, TrendingDown } from 'lucide-react';
+import { useTrades } from '../hooks/useQueries';
 import type { Trade } from '../lib/types';
 
 export function Trades() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Use React Query hook for data fetching
+  const { data, isLoading, error } = useTrades({ limit: 1000 });
+  const trades = data?.trades || [];
+  
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   
-  // Filters
+  // Filters (local UI state)
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Pagination
+  // Pagination (local UI state)
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
 
-  useEffect(() => {
-    loadTrades();
-  }, []);
-
-  async function loadTrades() {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await api.getTrades({ limit: 1000 }); // Load all trades
-      setTrades(data.trades || []); // Extract trades array from response
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load trades');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   // Filter trades
-  const filteredTrades = trades.filter(trade => {
+  const filteredTrades = trades.filter((trade: Trade) => {
     // Status filter
     if (statusFilter !== 'all' && trade.status !== statusFilter) {
       return false;
@@ -63,7 +47,7 @@ export function Trades() {
   // Export to CSV
   function exportToCSV() {
     const headers = ['ID', 'Market', 'Outcome', 'Status', 'Entry Price', 'Exit Price', 'Amount', 'Shares', 'P&L', 'Confidence', 'Triggered By', 'Timestamp'];
-    const rows = filteredTrades.map(t => [
+    const rows = filteredTrades.map((t: Trade) => [
       t.id,
       `"${t.market_title}"`,
       t.outcome,
@@ -88,7 +72,7 @@ export function Trades() {
     URL.revokeObjectURL(url);
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-96">
         <div className="text-center">
@@ -103,7 +87,7 @@ export function Trades() {
     return (
       <div className="bg-red-500/10 border border-red-500 text-red-500 rounded-lg p-4">
         <p className="font-semibold">Error loading trades</p>
-        <p className="text-sm mt-1">{error}</p>
+        <p className="text-sm mt-1">{error instanceof Error ? error.message : 'Failed to load trades'}</p>
       </div>
     );
   }
@@ -195,7 +179,7 @@ export function Trades() {
                   </td>
                 </tr>
               ) : (
-                paginatedTrades.map((trade) => (
+                paginatedTrades.map((trade: Trade) => (
                   <tr
                     key={trade.id}
                     onClick={() => setSelectedTrade(trade)}
@@ -229,7 +213,7 @@ export function Trades() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <span className="text-sm text-slate-300">
-                        {trade.confidence_score.toFixed(1)}
+                        {safeToFixed(trade.confidence_score, 1)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-400">
@@ -343,8 +327,8 @@ function TradeModal({ trade, onClose }: { trade: Trade; onClose: () => void }) {
             <InfoItem label="Entry Price" value={formatPercent(trade.entry_price)} />
             <InfoItem label="Exit Price" value={trade.exit_price ? formatPercent(trade.exit_price) : '-'} />
             <InfoItem label="Amount" value={formatUSD(trade.virtual_amount)} />
-            <InfoItem label="Shares" value={trade.shares.toFixed(2)} />
-            <InfoItem label="Confidence Score" value={trade.confidence_score.toFixed(1)} />
+            <InfoItem label="Shares" value={safeToFixed(trade.shares, 2)} />
+            <InfoItem label="Confidence Score" value={safeToFixed(trade.confidence_score, 1)} />
             <InfoItem label="Created" value={timeAgo(trade.timestamp)} />
           </div>
 

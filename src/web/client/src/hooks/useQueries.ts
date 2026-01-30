@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import type { ConfigUpdatePayload, ClosePositionRequest } from '../lib/types';
 
 /**
  * React Query hooks for all API endpoints
@@ -20,6 +21,9 @@ export const queryKeys = {
   activity: (limit: number) => ['activity', limit] as const,
   botStatus: ['botStatus'] as const,
   config: ['config'] as const,
+  orders: (params?: { limit?: number; type?: string; status?: string }) => ['orders', params] as const,
+  order: (id: string) => ['order', id] as const,
+  orderStats: ['orderStats'] as const,
 };
 
 // Overview (Dashboard stats)
@@ -168,10 +172,65 @@ export function useUpdateConfig() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (updates: Record<string, any>) => api.updateConfig(updates),
+    mutationFn: (updates: ConfigUpdatePayload) => api.updateConfig(updates),
     onSuccess: () => {
       // Invalidate config to refetch updated values
       queryClient.invalidateQueries({ queryKey: queryKeys.config });
+    },
+  });
+}
+
+// Orders
+export function useOrders(params?: { limit?: number; type?: 'paper' | 'real' | 'all'; status?: string }) {
+  return useQuery({
+    queryKey: queryKeys.orders(params),
+    queryFn: () => api.getOrders(params),
+  });
+}
+
+// Single Order
+export function useOrder(id: string) {
+  return useQuery({
+    queryKey: queryKeys.order(id),
+    queryFn: () => api.getOrder(id),
+    enabled: !!id, // Only fetch if id is provided
+  });
+}
+
+// Order Stats
+export function useOrderStats() {
+  return useQuery({
+    queryKey: queryKeys.orderStats,
+    queryFn: () => api.getOrderStats(),
+  });
+}
+
+// Cancel Order Mutation
+export function useCancelOrder() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (orderId: string) => api.cancelOrder(orderId),
+    onSuccess: () => {
+      // Invalidate orders to refetch
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orderStats });
+    },
+  });
+}
+
+// Close Position Mutation
+export function useClosePosition() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ orderId, request }: { orderId: string; request: ClosePositionRequest }) => 
+      api.closePosition(orderId, request),
+    onSuccess: () => {
+      // Invalidate orders and stats to refetch
+      queryClient.invalidateQueries({ queryKey: queryKeys.orders() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orderStats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.overview });
     },
   });
 }

@@ -4,12 +4,14 @@ import { betRater } from '../services/betRater.js';
 import { tradeEngine } from '../services/tradeEngine.js';
 import { alertSystem } from './alertSystem.js';
 import { performanceTracker } from './performanceTracker.js';
+import { orderStatusMonitor } from '../services/orderStatusMonitor.js';
 import { logger } from '../utils/logger.js';
 import { CONFIG } from '../config/settings.js';
 import { sleep } from '../utils/helpers.js';
 import { getAllWatchedWallets, updateWalletRecord } from '../models/wallet.js';
 import { getRecentWalletTrades, getUnresolvedTrades, resolveWalletTrade, markTradeAsArchived } from '../models/trade.js';
 import { getOpenPaperTrades, resolvePaperTrade, cancelPaperTrade } from '../models/paperTrade.js';
+import { getOpenRealTrades, resolveRealTrade } from '../models/realTrade.js';
 import { polymarketApi } from '../services/polymarket/api.js';
 import { polymarketWS } from '../services/polymarket/wsClient.js';
 import { WSLastTradePrice, WSMarketResolved } from '../services/polymarket/wsTypes.js';
@@ -43,6 +45,18 @@ export class Monitor {
     // Initialize trade engine
     tradeEngine.initialize();
 
+    // Start order status monitor (for real trading)
+    if (CONFIG.REAL_TRADING_ENABLED) {
+      try {
+        const wsManager = getWebSocketManager();
+        await orderStatusMonitor.start(wsManager || undefined);
+        logger.info('Order status monitor started');
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Failed to start order status monitor: ${errorMessage}`);
+      }
+    }
+
     // Seed initial whales from leaderboard
     try {
       logger.info('Seeding initial whales from leaderboard...');
@@ -71,6 +85,9 @@ export class Monitor {
    */
   stop(): void {
     this.running = false;
+    
+    // Stop order status monitor
+    orderStatusMonitor.stop();
     
     // Disconnect WebSocket if connected
     if (CONFIG.USE_WEBSOCKET && polymarketWS.isConnected()) {
@@ -163,6 +180,7 @@ export class Monitor {
       // Get unresolved trades for this market
       const unresolvedTrades = getUnresolvedTrades().filter(t => t.market_id === event.id);
       const openPaperTrades = getOpenPaperTrades().filter(t => t.market_id === event.id);
+      const openRealTrades = getOpenRealTrades().filter(t => t.market_id === event.id);
       
       let resolvedCount = 0;
 
@@ -205,6 +223,33 @@ export class Monitor {
         } catch (error) {
           // Silently fail if dashboard is not running
         }
+      }
+      
+      // Resolve real trades
+      for (const trade of openRealTrades) {
+        const won = trade.outcome === event.winning_outcome;
+        resolveRealTrade(trade.id, won);
+        
+        const pnl = won ? (trade.shares - trade.amount_usd) : -trade.amount_usd;
+        logger.info(`Resolved real trade: ${won ? 'WON' : 'LOST'} | P&L: ${won ? '+' : ''}$${pnl.toFixed(2)}`);
+        
+        // Broadcast real trade resolution to WebSocket clients
+        try {
+          const wsManager = getWebSocketManager();
+          if (wsManager) {
+            wsManager.sendTradeResolved({
+              id: trade.id,
+              market: trade.market_title,
+              outcome: trade.outcome,
+              won,
+              pnl,
+              timestamp: Date.now(),
+            });
+          }
+        } catch (error) {
+          // Silently fail if dashboard is not running
+        }
+        resolvedCount++;
       }
 
       if (resolvedCount > 0) {
@@ -434,6 +479,9 @@ export class Monitor {
         
         // Get all open paper trades
         const openPaperTrades = getOpenPaperTrades();
+        
+        // Get all open real trades
+        const openRealTrades = getOpenRealTrades();
 
         // Filter by age - only check recent trades (within threshold)
         const ageThresholdMs = CONFIG.MARKET_AGE_THRESHOLD_DAYS * 24 * 60 * 60 * 1000;
@@ -445,6 +493,11 @@ export class Monitor {
         });
         
         const recentPaperTrades = openPaperTrades.filter(t => {
+          const tradeTime = new Date(t.timestamp).getTime();
+          return tradeTime >= cutoffTime;
+        });
+        
+        const recentRealTrades = openRealTrades.filter(t => {
           const tradeTime = new Date(t.timestamp).getTime();
           return tradeTime >= cutoffTime;
         });
@@ -472,6 +525,7 @@ export class Monitor {
         const marketIds = new Set<string>();
         recentWalletTrades.forEach(t => marketIds.add(t.market_id));
         recentPaperTrades.forEach(t => marketIds.add(t.market_id));
+        recentRealTrades.forEach(t => marketIds.add(t.market_id));
 
         let resolvedCount = 0;
         let archivedCount = 0;
@@ -485,83 +539,32 @@ export class Monitor {
             );
             
             if (!market) {
-              // Market unavailable (likely 422 - archived/resolved)
-              // Try fallback: check if any wallet has a closed position for this market
-              logger.debug(`Market ${marketId} unavailable via /markets, trying /closed-positions fallback...`);
+              // Market unavailable (likely 422 - archived/resolved, or temporary API issue)
+              // IMPORTANT: We cannot safely determine resolution from closed positions
+              // Closed positions indicate a wallet SOLD their position, NOT that the market resolved
+              logger.debug(`Market ${marketId} unavailable via /markets - skipping for now`);
               
+              // Only archive very old trades (older than 30 days)
               const marketWalletTrades = recentWalletTrades.filter(t => t.market_id === marketId);
               const marketPaperTrades = recentPaperTrades.filter(t => t.market_id === marketId);
               
-              // Get unique wallet addresses to query
-              const walletAddresses = new Set<string>();
-              marketWalletTrades.forEach(t => walletAddresses.add(t.wallet_address));
-              marketPaperTrades.forEach(t => walletAddresses.add(t.triggered_by));
-              
-              let resolutionFound = false;
-              let winningOutcome: string | null = null;
-              
-              // Check closed positions for each wallet
-              for (const walletAddr of walletAddresses) {
-                const closedPositions = await polymarketApi.getClosedPositions(walletAddr, marketId);
+              if (CONFIG.MARK_OLD_AS_ARCHIVED) {
+                const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
                 
-                if (closedPositions.length > 0) {
-                  // Found a closed position - market is resolved!
-                  const closedPos = closedPositions[0];
-                  resolutionFound = true;
-                  
-                  // Determine winning outcome from closed position
-                  // If realizedPnl > 0, this outcome won. If < 0, opposite outcome won.
-                  if (closedPos.realizedPnl > 0) {
-                    winningOutcome = closedPos.outcome;
-                  } else {
-                    winningOutcome = closedPos.oppositeOutcome;
-                  }
-                  
-                  logger.info(`Found resolution via closed position: ${winningOutcome} won (market: ${closedPos.title})`);
-                  break;
-                }
-              }
-              
-              if (resolutionFound && winningOutcome) {
-                // Resolve all trades for this market using the winning outcome
                 for (const trade of marketWalletTrades) {
-                  const won = trade.outcome === winningOutcome;
-                  resolveWalletTrade(trade.id, won);
-                  updateWalletRecord(trade.wallet_address, won);
-                  logger.info(`Resolved trade for ${trade.wallet_address}: ${won ? 'WON' : 'LOST'} (via fallback)`);
-                  resolvedCount++;
+                  const tradeAge = Date.now() - new Date(trade.timestamp).getTime();
+                  if (tradeAge > thirtyDaysAgo) {
+                    markTradeAsArchived(trade.id, 'Market unavailable for 30+ days');
+                    archivedCount++;
+                  }
                 }
                 
                 for (const trade of marketPaperTrades) {
-                  const won = trade.outcome === winningOutcome;
-                  resolvePaperTrade(trade.id, won);
-                  
-                  if (won) {
-                    tradeEngine.updateBalance(trade.shares - trade.virtual_amount);
-                  } else {
-                    tradeEngine.updateBalance(-trade.virtual_amount);
-                  }
-                  
-                  logger.info(`Resolved paper trade: ${won ? 'WON' : 'LOST'} | P&L: ${won ? '+' : ''}$${(won ? trade.shares - trade.virtual_amount : -trade.virtual_amount).toFixed(2)} (via fallback)`);
-                }
-              } else {
-                // Could not determine outcome via any method
-                if (CONFIG.MARK_OLD_AS_ARCHIVED) {
-                  // Archive wallet trades
-                  for (const trade of marketWalletTrades) {
-                    markTradeAsArchived(trade.id, 'Market unavailable - outcome indeterminate');
-                    archivedCount++;
-                  }
-                  
-                  if (marketWalletTrades.length > 0) {
-                    logger.debug(`Archived ${marketWalletTrades.length} trades for indeterminate market ${marketId}`);
-                  }
-                  
-                  // Cancel paper trades (don't count as wins or losses)
-                  for (const trade of marketPaperTrades) {
-                    cancelPaperTrade(trade.id, 'Market outcome indeterminate');
+                  const tradeAge = Date.now() - new Date(trade.timestamp).getTime();
+                  if (tradeAge > thirtyDaysAgo) {
+                    cancelPaperTrade(trade.id, 'Market unavailable for 30+ days');
                     tradeEngine.updateBalance(trade.virtual_amount); // Return capital
-                    logger.info(`Paper trade cancelled (indeterminate outcome): $${trade.virtual_amount.toFixed(2)} returned to balance`);
+                    logger.info(`Paper trade cancelled (old unavailable market): $${trade.virtual_amount.toFixed(2)} returned to balance`);
                   }
                 }
               }
@@ -629,6 +632,34 @@ export class Monitor {
               } catch (error) {
                 // Silently fail if dashboard is not running
               }
+            }
+            
+            // Resolve real trades for this market
+            const marketRealTrades = recentRealTrades.filter(t => t.market_id === marketId);
+            for (const trade of marketRealTrades) {
+              const won = trade.outcome === winningOutcome;
+              resolveRealTrade(trade.id, won);
+              
+              const pnl = won ? (trade.shares - trade.amount_usd) : -trade.amount_usd;
+              logger.info(`Resolved real trade: ${won ? 'WON' : 'LOST'} | P&L: ${won ? '+' : ''}$${pnl.toFixed(2)}`);
+              
+              // Broadcast real trade resolution to WebSocket clients
+              try {
+                const wsManager = getWebSocketManager();
+                if (wsManager) {
+                  wsManager.sendTradeResolved({
+                    id: trade.id,
+                    market: trade.market_title,
+                    outcome: trade.outcome,
+                    won,
+                    pnl,
+                    timestamp: Date.now(),
+                  });
+                }
+              } catch (error) {
+                // Silently fail if dashboard is not running
+              }
+              resolvedCount++;
             }
 
           } catch (error) {

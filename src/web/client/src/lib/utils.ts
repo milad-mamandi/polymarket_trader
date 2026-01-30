@@ -71,3 +71,34 @@ export function formatMs(ms: number): string {
   }
   return `= ${ms} millisecond${ms !== 1 ? 's' : ''}`;
 }
+
+/**
+ * Safe toFixed - returns 'N/A' for null/undefined values
+ * Prevents "Cannot read properties of undefined (reading 'toFixed')" errors
+ */
+export function safeToFixed(
+  value: number | null | undefined,
+  decimals: number = 2
+): string {
+  if (value == null || isNaN(value)) return 'N/A';
+  return value.toFixed(decimals);
+}
+
+/**
+ * Safe USD formatter - returns 'N/A' for null/undefined values
+ */
+export function safeFormatUSD(value: number | null | undefined): string {
+  if (value == null || isNaN(value)) return 'N/A';
+  return formatUSD(value);
+}
+
+/**
+ * Safe percent formatter - returns 'N/A' for null/undefined values
+ */
+export function safeFormatPercent(
+  value: number | null | undefined,
+  decimals: number = 1
+): string {
+  if (value == null || isNaN(value)) return 'N/A';
+  return formatPercent(value, decimals);
+}

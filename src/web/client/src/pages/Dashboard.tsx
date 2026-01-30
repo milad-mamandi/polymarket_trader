@@ -1,91 +1,70 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { api } from '../lib/api';
-import { formatUSD, formatPercent, formatNumber, timeAgo } from '../lib/utils';
+import { formatUSD, formatPercent, formatNumber, timeAgo, safeToFixed } from '../lib/utils';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from '../components/ToastProvider';
-import { Play, Square, RotateCw, TrendingUp, TrendingDown } from 'lucide-react';
-import type { Trade, OverviewResponse, BotStatus } from '../lib/types';
+import { Play, Square, RotateCw, TrendingUp, TrendingDown, ListOrdered } from 'lucide-react';
+import { useOverview, useTrades, useBotStatus, usePerformance, useBotControl, useOrderStats } from '../hooks/useQueries';
+import { useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import type { StatCardProps, StatusColors, Trade } from '../lib/types';
 
 export function Dashboard() {
-  const [overview, setOverview] = useState<OverviewResponse | null>(null);
-  const [recentTrades, setRecentTrades] = useState<Trade[]>([]);
-  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
-  const [performanceHistory, setPerformanceHistory] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [controlLoading, setControlLoading] = useState(false);
+  // Use React Query hooks for data fetching
+  const { data: overviewData, isLoading: overviewLoading, error: overviewError } = useOverview();
+  const { data: tradesData, isLoading: tradesLoading } = useTrades({ limit: 10 });
+  const { data: statusData, isLoading: statusLoading } = useBotStatus();
+  const { data: performanceData, isLoading: performanceLoading } = usePerformance(7);
+  const { data: orderStatsData } = useOrderStats();
+  
+  // Bot control mutations
+  const { startBot, stopBot, restartBot } = useBotControl();
   
   const { isConnected, lastMessage } = useWebSocket();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 30000); // Refresh every 30s
-    return () => clearInterval(interval);
-  }, []);
+  // Derive data from hooks
+  const overview = overviewData || null;
+  const recentTrades = tradesData?.trades || [];
+  const botStatus = statusData || null;
+  const performanceHistory = performanceData?.history || [];
+  const loading = overviewLoading || tradesLoading || statusLoading || performanceLoading;
+  const error = overviewError ? (overviewError instanceof Error ? overviewError.message : 'Failed to load data') : null;
 
+  // WebSocket integration - invalidate queries on updates
   useEffect(() => {
     if (lastMessage) {
       switch (lastMessage.type) {
         case 'portfolio':
         case 'trade:new':
         case 'trade:resolved':
-          loadData();
+          // Invalidate all dashboard queries to trigger refetch
+          queryClient.invalidateQueries({ queryKey: ['overview'] });
+          queryClient.invalidateQueries({ queryKey: ['trades'] });
+          queryClient.invalidateQueries({ queryKey: ['performance'] });
           break;
         case 'bot:status':
-          setBotStatus(lastMessage.data);
+          // Update bot status directly
+          queryClient.setQueryData(['botStatus'], lastMessage.data);
           break;
       }
     }
-  }, [lastMessage]);
+  }, [lastMessage, queryClient]);
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const [overviewData, tradesData, statusData, performanceData] = await Promise.all([
-        api.getOverview(),
-        api.getTrades({ limit: 10 }),
-        api.getBotStatus(),
-        api.getPerformance(7), // Last 7 days
-      ]);
-      
-      setOverview(overviewData);
-      setRecentTrades(tradesData.trades || []);
-      setBotStatus(statusData);
-      setPerformanceHistory(performanceData.history || []);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load data');
-      console.error('Error loading data:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleBotControl(action: 'start' | 'stop' | 'restart') {
-    try {
-      setControlLoading(true);
-      if (action === 'start') {
-        await api.startBot();
-        showToast('Bot started successfully', 'success');
+  // Bot control handlers using mutations
+  function handleBotControl(action: 'start' | 'stop' | 'restart') {
+    const mutation = action === 'start' ? startBot : action === 'stop' ? stopBot : restartBot;
+    
+    mutation.mutate(undefined, {
+      onSuccess: () => {
+        showToast(`Bot ${action}ed successfully`, 'success');
+      },
+      onError: (err: unknown) => {
+        const message = err instanceof Error ? err.message : `Failed to ${action} bot`;
+        showToast(message, 'error');
       }
-      if (action === 'stop') {
-        await api.stopBot();
-        showToast('Bot stopped successfully', 'success');
-      }
-      if (action === 'restart') {
-        await api.restartBot();
-        showToast('Bot restarted successfully', 'success');
-      }
-      
-      setTimeout(loadData, 1000);
-    } catch (err: any) {
-      showToast(err.message || `Failed to ${action} bot`, 'error');
-    } finally {
-      setControlLoading(false);
-    }
+    });
   }
 
   if (loading && !overview) {
@@ -106,7 +85,7 @@ export function Dashboard() {
           <div className="text-red-500 text-xl mb-4">⚠️ Error</div>
           <div className="text-slate-400 mb-4">{error}</div>
           <button
-            onClick={loadData}
+            onClick={() => queryClient.invalidateQueries()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
           >
             Retry
@@ -128,7 +107,7 @@ export function Dashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <StatCard
           title="Balance"
           value={formatUSD(overview?.portfolio?.balance || 0)}
@@ -144,8 +123,14 @@ export function Dashboard() {
           icon={pnl >= 0 ? TrendingUp : TrendingDown}
         />
         <StatCard
+          title="Open Positions"
+          value={formatUSD(overview?.portfolio?.openPositionsValue || 0)}
+          subtitle={`${overview?.trades?.open || 0} active`}
+          trend="neutral"
+        />
+        <StatCard
           title="Win Rate"
-          value={`${winRate.toFixed(1)}%`}
+          value={`${safeToFixed(winRate, 1)}%`}
           subtitle={`${overview?.trades?.won || 0}W / ${overview?.trades?.lost || 0}L`}
           trend={winRate >= 50 ? 'up' : 'down'}
         />
@@ -177,7 +162,7 @@ export function Dashboard() {
                 <YAxis 
                   stroke="#9CA3AF"
                   tick={{ fill: '#9CA3AF' }}
-                  tickFormatter={(value) => `$${value.toFixed(0)}`}
+                  tickFormatter={(value: number) => `$${safeToFixed(value, 0)}`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -187,7 +172,7 @@ export function Dashboard() {
                     color: '#fff'
                   }}
                   labelFormatter={(label) => `Date: ${label}`}
-                  formatter={(value: any) => [`$${value.toFixed(2)}`, 'Total P&L']}
+                  formatter={(value: number) => [`$${safeToFixed(value, 2)}`, 'Total P&L']}
                 />
                 <Line 
                   type="monotone" 
@@ -219,7 +204,7 @@ export function Dashboard() {
           <div className="flex gap-2">
             <button
               onClick={() => handleBotControl('start')}
-              disabled={botStatus?.running || controlLoading}
+              disabled={botStatus?.running || startBot.isPending}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition-colors"
             >
               <Play className="w-4 h-4" />
@@ -227,7 +212,7 @@ export function Dashboard() {
             </button>
             <button
               onClick={() => handleBotControl('stop')}
-              disabled={!botStatus?.running || controlLoading}
+              disabled={!botStatus?.running || stopBot.isPending}
               className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition-colors"
             >
               <Square className="w-4 h-4" />
@@ -235,7 +220,7 @@ export function Dashboard() {
             </button>
             <button
               onClick={() => handleBotControl('restart')}
-              disabled={controlLoading}
+              disabled={restartBot.isPending}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition-colors"
             >
               <RotateCw className="w-4 h-4" />
@@ -245,11 +230,55 @@ export function Dashboard() {
         </div>
       </div>
 
+      {/* Order Status Widget */}
+      {orderStatsData && (
+        <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <ListOrdered className="w-5 h-5 text-blue-400" />
+              <h3 className="text-lg font-semibold">Order Status</h3>
+            </div>
+            <Link
+              to="/orders"
+              className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              View All →
+            </Link>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-slate-700/50 rounded p-3">
+              <div className="text-slate-400 text-xs mb-1">Total Orders</div>
+              <div className="text-xl font-bold text-white">{orderStatsData.combined.total}</div>
+            </div>
+            <div className="bg-slate-700/50 rounded p-3">
+              <div className="text-slate-400 text-xs mb-1">Pending</div>
+              <div className="text-xl font-bold text-yellow-400">{orderStatsData.combined.pending}</div>
+            </div>
+            <div className="bg-slate-700/50 rounded p-3">
+              <div className="text-slate-400 text-xs mb-1">Open</div>
+              <div className="text-xl font-bold text-blue-400">{orderStatsData.combined.open}</div>
+            </div>
+          </div>
+          
+          <div className="mt-4 pt-4 border-t border-slate-700">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <div className="text-slate-400">Paper: {orderStatsData.paper.total}</div>
+              </div>
+              <div>
+                <div className="text-slate-400">Real: {orderStatsData.real?.total || 0}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recent Trades */}
       <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
         <h3 className="text-lg font-semibold mb-4">Recent Paper Trades</h3>
         <div className="space-y-2">
-          {recentTrades.map((trade: any) => (
+          {recentTrades.map((trade: Trade) => (
             <div key={trade.id} className="bg-slate-700/50 rounded p-3">
               <div className="flex justify-between items-start mb-1">
                 <div className="flex-1">
@@ -262,7 +291,7 @@ export function Dashboard() {
               </div>
               <div className="flex justify-between items-center mt-2 text-xs">
                 <span className="text-slate-400">
-                  {trade.detected_at ? timeAgo(trade.detected_at) : timeAgo(trade.timestamp)}
+                  {timeAgo(trade.timestamp)}
                 </span>
                 {trade.pnl !== null && trade.pnl !== undefined && (
                   <span className={trade.pnl >= 0 ? 'text-green-400' : 'text-red-400'}>
@@ -293,8 +322,8 @@ export function Dashboard() {
   );
 }
 
-function StatCard({ title, value, subtitle, trend, icon: Icon }: any) {
-  const trendColors = {
+function StatCard({ title, value, subtitle, trend, icon: Icon }: StatCardProps) {
+  const trendColors: StatusColors = {
     up: 'text-green-400',
     down: 'text-red-400',
     neutral: 'text-slate-400',
@@ -315,7 +344,7 @@ function StatCard({ title, value, subtitle, trend, icon: Icon }: any) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const colors: any = {
+  const colors: StatusColors = {
     OPEN: 'bg-blue-500/20 text-blue-400',
     WON: 'bg-green-500/20 text-green-400',
     LOST: 'bg-red-500/20 text-red-400',

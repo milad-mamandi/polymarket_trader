@@ -6,6 +6,7 @@ import { logger, logTrade } from '../utils/logger.js';
 import { generateId, formatUSD, timeAgo, truncateAddress } from '../utils/helpers.js';
 import { getWalletStats } from '../models/wallet.js';
 import { getWebSocketManager } from '../index.js';
+import { executeRealTrade } from './realTradeExecutor.js';
 
 export interface PaperTradeResult {
   executed: boolean;
@@ -13,6 +14,11 @@ export interface PaperTradeResult {
   reason?: string;
   amount?: number;
   shares?: number;
+}
+
+export interface TradeResult extends PaperTradeResult {
+  mode: 'paper' | 'real';
+  orderId?: string;
 }
 
 /**
@@ -43,19 +49,32 @@ export class TradeEngine {
   }
 
   /**
-   * Evaluate and potentially execute a paper trade
+   * Evaluate and potentially execute a trade (paper or real based on config)
    */
-  async evaluateTrade(rating: BetRating): Promise<PaperTradeResult> {
+  async evaluateTrade(rating: BetRating): Promise<TradeResult> {
     this.ensureInitialized();
 
     // Check if rating meets threshold
     if (!rating.shouldTrade) {
       return {
+        mode: CONFIG.TRADING_MODE,
         executed: false,
         reason: `Confidence too low: ${rating.finalScore}% < ${CONFIG.MIN_CONFIDENCE_FOR_TRADE}%`,
       };
     }
 
+    // Route to appropriate execution method
+    if (CONFIG.TRADING_MODE === 'real') {
+      return await this.executeRealTrade(rating);
+    } else {
+      return await this.executePaperTrade(rating);
+    }
+  }
+
+  /**
+   * Execute a paper trade
+   */
+  private async executePaperTrade(rating: BetRating): Promise<TradeResult> {
     // Calculate position size (percentage of portfolio)
     const maxAmount = this.paperBalance * (CONFIG.MAX_POSITION_SIZE_PERCENT / 100);
     
@@ -67,6 +86,7 @@ export class TradeEngine {
     // Check if we have enough balance
     if (positionSize > this.paperBalance) {
       return {
+        mode: 'paper',
         executed: false,
         reason: `Insufficient balance: ${formatUSD(this.paperBalance)} < ${formatUSD(positionSize)}`,
       };
@@ -93,6 +113,78 @@ export class TradeEngine {
     this.paperBalance -= positionSize;
 
     // Log the trade
+    this.logTradeExecution(rating, trade, positionSize, shares);
+
+    logger.info(`✓ Paper trade executed: ${truncateAddress(rating.walletAddress)} | ${trade.outcome} @ ${trade.price} | ${formatUSD(positionSize)}`);
+
+    // Broadcast new trade to WebSocket clients
+    this.broadcastTradeUpdate(tradeId, rating, trade, positionSize, shares);
+
+    return {
+      mode: 'paper',
+      executed: true,
+      tradeId,
+      amount: positionSize,
+      shares,
+    };
+  }
+
+  /**
+   * Execute a real trade
+   */
+  private async executeRealTrade(rating: BetRating): Promise<TradeResult> {
+    const trade = rating.trade;
+    
+    // Calculate position size using same logic as paper trading
+    const maxAmount = CONFIG.INITIAL_PAPER_BALANCE * (CONFIG.MAX_POSITION_SIZE_PERCENT / 100);
+    const confidenceMultiplier = rating.finalScore / 100;
+    const positionSize = maxAmount * confidenceMultiplier;
+
+    // Ensure position size doesn't exceed max real trading limit
+    const amountUsd = Math.min(positionSize, CONFIG.REAL_TRADING_MAX_POSITION_USD);
+
+    // Execute real trade via CLOB
+    const result = await executeRealTrade({
+      wallet: { address: rating.walletAddress, isWhale: true, isNewSuspicious: false, trade },
+      marketId: trade.conditionId,
+      marketTitle: trade.title,
+      outcome: trade.outcome,
+      amountUsd,
+      confidence: rating.finalScore,
+    });
+
+    if (!result.success) {
+      return {
+        mode: 'real',
+        executed: false,
+        reason: result.error || 'Real trade execution failed',
+      };
+    }
+
+    const shares = amountUsd / trade.price;
+
+    // Log the trade
+    this.logTradeExecution(rating, trade, amountUsd, shares);
+
+    logger.info(`✓ Real trade executed: ${truncateAddress(rating.walletAddress)} | ${trade.outcome} @ ${trade.price} | ${formatUSD(amountUsd)} | Order: ${result.orderId}`);
+
+    // Broadcast new trade to WebSocket clients
+    this.broadcastTradeUpdate(result.tradeId!, rating, trade, amountUsd, shares);
+
+    return {
+      mode: 'real',
+      executed: true,
+      tradeId: result.tradeId,
+      orderId: result.orderId,
+      amount: amountUsd,
+      shares,
+    };
+  }
+
+  /**
+   * Log trade execution details
+   */
+  private logTradeExecution(rating: BetRating, trade: Trade, amount: number, shares: number): void {
     const walletStats = getWalletStats(rating.walletAddress);
     const walletType = this.getWalletType(rating.walletAddress);
     
@@ -106,22 +198,30 @@ export class TradeEngine {
       walletType,
       walletAge: walletStats ? timeAgo(walletStats.first_seen) : 'Unknown',
       walletScore: rating.walletScore,
-      winRate: walletStats ? `${walletStats.winRate * 100}% (${walletStats.win_count}/${walletStats.totalTrades})` : 'N/A',
+      winRate: walletStats ? `${walletStats.winRate * 100}% (${walletStats.win_count}/${walletStats.total_trades})` : 'N/A',
       market: trade.title,
       conditionId: trade.conditionId,
       outcome: trade.outcome,
       entryPrice: trade.price,
       confidence: rating.finalScore,
       confidenceBreakdown: confidenceBreakdownNumeric,
-      virtualAmount: positionSize,
+      virtualAmount: amount,
       shares,
       potentialPayout: shares,
-      risk: positionSize,
+      risk: amount,
     });
+  }
 
-    logger.info(`✓ Paper trade executed: ${truncateAddress(rating.walletAddress)} | ${trade.outcome} @ ${trade.price} | ${formatUSD(positionSize)}`);
-
-    // Broadcast new trade to WebSocket clients
+  /**
+   * Broadcast trade update to WebSocket clients
+   */
+  private broadcastTradeUpdate(
+    tradeId: string,
+    rating: BetRating,
+    trade: Trade,
+    amount: number,
+    shares: number
+  ): void {
     try {
       const wsManager = getWebSocketManager();
       if (wsManager) {
@@ -131,26 +231,21 @@ export class TradeEngine {
           market: trade.title,
           outcome: trade.outcome,
           price: trade.price,
-          amount: positionSize,
+          amount,
           shares,
           confidence: rating.finalScore,
           timestamp: Date.now(),
         });
         
-        // Also send updated portfolio
-        wsManager.sendPortfolioUpdate(this.getPortfolioStatus());
+        // Also send updated portfolio (paper mode only)
+        if (CONFIG.TRADING_MODE === 'paper') {
+          wsManager.sendPortfolioUpdate(this.getPortfolioStatus());
+        }
       }
     } catch (error) {
       // Silently fail if dashboard is not running
       logger.debug('WebSocket broadcast skipped (dashboard not running)');
     }
-
-    return {
-      executed: true,
-      tradeId,
-      amount: positionSize,
-      shares,
-    };
   }
 
   /**

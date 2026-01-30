@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { useState } from 'react';
 import { useToast } from '../components/ToastProvider';
-import { formatMs, formatNumber } from '../lib/utils';
-import { Save, AlertCircle, Trash2 } from 'lucide-react';
+import { formatMs, formatNumber, safeToFixed } from '../lib/utils';
+import { Save, AlertCircle, Trash2, AlertTriangle, Shield } from 'lucide-react';
+import { useConfig, useUpdateConfig, useBotControl } from '../hooks/useQueries';
+import axios from 'axios';
+import type { ConfigValue, SafetyStatus, KillSwitchStatus } from '../lib/types';
 
 interface ConfigItem {
   key: string;
-  value: any;
+  value: ConfigValue;
   type: string;
   category: string;
   description: string;
@@ -14,35 +16,27 @@ interface ConfigItem {
   max?: number;
   masked?: boolean;
   secret?: boolean;
+  options?: string[];
 }
 
 export function Settings() {
-  const [config, setConfig] = useState<Record<string, ConfigItem> | null>(null);
-  const [editedValues, setEditedValues] = useState<Record<string, any>>({});
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Use React Query hooks
+  const { data: configData, isLoading, error: queryError, refetch } = useConfig();
+  const updateConfigMutation = useUpdateConfig();
+  const { resetData } = useBotControl();
+  
+  const [editedValues, setEditedValues] = useState<Record<string, ConfigValue>>({});
   const [showResetDialog, setShowResetDialog] = useState(false);
-  const [resetting, setResetting] = useState(false);
+  const [showKillSwitchDialog, setShowKillSwitchDialog] = useState(false);
+  const [killSwitchAction, setKillSwitchAction] = useState<'activate' | 'deactivate'>('activate');
+  const [killSwitchLoading, setKillSwitchLoading] = useState(false);
   
   const { showToast } = useToast();
 
-  useEffect(() => {
-    loadConfig();
-  }, []);
-
-  async function loadConfig() {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await api.getConfig();
-      setConfig(data.config);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load configuration');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const config = configData?.config || null;
+  const killSwitchStatus: KillSwitchStatus = configData?.killSwitch || { activated: false };
+  const safetyStatus: SafetyStatus | null = configData?.safetyStatus || null;
+  const error = queryError ? (queryError instanceof Error ? queryError.message : 'Failed to load configuration') : null;
 
   async function handleSave() {
     if (Object.keys(editedValues).length === 0) {
@@ -50,25 +44,19 @@ export function Settings() {
       return;
     }
 
-    try {
-      setSaving(true);
-      setError(null);
-      
-      await api.updateConfig(editedValues);
-      
-      showToast(`Saved ${Object.keys(editedValues).length} change(s). Restart the bot for changes to take effect.`, 'success');
-      setEditedValues({});
-      
-      // Reload config to get updated values
-      setTimeout(loadConfig, 1000);
-    } catch (err: any) {
-      showToast(err.message || 'Failed to save configuration', 'error');
-    } finally {
-      setSaving(false);
-    }
+    updateConfigMutation.mutate(editedValues, {
+      onSuccess: () => {
+        showToast(`Saved ${Object.keys(editedValues).length} change(s). Restart the bot for changes to take effect.`, 'success');
+        setEditedValues({});
+      },
+      onError: (err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Failed to save configuration';
+        showToast(message, 'error');
+      }
+    });
   }
 
-  function handleChange(key: string, value: any) {
+  function handleChange(key: string, value: ConfigValue) {
     setEditedValues(prev => ({
       ...prev,
       [key]: value
@@ -76,20 +64,50 @@ export function Settings() {
   }
 
   async function handleReset() {
+    resetData.mutate(undefined, {
+      onSuccess: () => {
+        showToast('Trading data reset successfully! All paper trades and performance history cleared.', 'success');
+        setShowResetDialog(false);
+        
+        // Navigate to dashboard
+        setTimeout(() => {
+          window.location.href = '/';
+        }, 1500);
+      },
+      onError: (err: unknown) => {
+        const message = err instanceof Error ? err.message : 'Failed to reset data';
+        showToast(message, 'error');
+      }
+    });
+  }
+
+  async function handleKillSwitch(action: 'activate' | 'deactivate') {
+    setKillSwitchLoading(true);
+    
     try {
-      setResetting(true);
-      await api.resetData();
-      showToast('Trading data reset successfully! All paper trades and performance history cleared.', 'success');
-      setShowResetDialog(false);
+      const endpoint = action === 'activate' 
+        ? '/api/config/killswitch/activate' 
+        : '/api/config/killswitch/deactivate';
       
-      // Optionally reload config or navigate to dashboard
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 1500);
-    } catch (err: any) {
-      showToast(err.message || 'Failed to reset data', 'error');
+      const response = await axios.post(endpoint, {
+        reason: 'User action from dashboard'
+      });
+      
+      showToast(response.data.message, 'success');
+      setShowKillSwitchDialog(false);
+      
+      // Refetch config to update status
+      refetch();
+    } catch (err: unknown) {
+      let message = `Failed to ${action} kill switch`;
+      if (axios.isAxiosError(err) && err.response?.data?.error) {
+        message = err.response.data.error;
+      } else if (err instanceof Error) {
+        message = err.message;
+      }
+      showToast(message, 'error');
     } finally {
-      setResetting(false);
+      setKillSwitchLoading(false);
     }
   }
 
@@ -117,7 +135,7 @@ export function Settings() {
         <div className="space-y-1">
           <input
             type="number"
-            value={currentValue || ''}
+            value={typeof currentValue === 'number' ? currentValue : ''}
             onChange={(e) => handleChange(item.key, e.target.value)}
             min={item.min}
             max={item.max}
@@ -127,13 +145,13 @@ export function Settings() {
             `}
           />
           {/* Show formatted number with commas */}
-          {currentValue && currentValue >= 1000 && (
+          {typeof currentValue === 'number' && currentValue >= 1000 && (
             <div className="text-xs text-slate-500">
               = {formatNumber(Number(currentValue))}
             </div>
           )}
           {/* Show time conversion for ms fields */}
-          {isTimingField && currentValue && (
+          {isTimingField && typeof currentValue === 'number' && (
             <div className="text-xs text-blue-400">
               {formatMs(Number(currentValue))}
             </div>
@@ -147,7 +165,7 @@ export function Settings() {
         return (
           <input
             type="password"
-            value={currentValue || ''}
+            value={typeof currentValue === 'string' ? currentValue : ''}
             onChange={(e) => handleChange(item.key, e.target.value)}
             placeholder="Enter new value to change"
             className={`
@@ -161,7 +179,7 @@ export function Settings() {
       return (
         <input
           type="text"
-          value={currentValue || ''}
+          value={typeof currentValue === 'string' ? currentValue : ''}
           onChange={(e) => handleChange(item.key, e.target.value)}
           className={`
             w-full px-3 py-2 bg-slate-700 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500
@@ -171,10 +189,30 @@ export function Settings() {
       );
     }
 
+    if (item.type === 'select' && item.options) {
+      const selectValue = typeof currentValue === 'string' || typeof currentValue === 'number' 
+        ? String(currentValue) 
+        : '';
+      return (
+        <select
+          value={selectValue}
+          onChange={(e) => handleChange(item.key, e.target.value)}
+          className={`
+            w-full px-3 py-2 bg-slate-700 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500
+            ${hasChanges ? 'border-yellow-500' : 'border-slate-600'}
+          `}
+        >
+          {item.options.map(option => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
+
     return null;
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
@@ -192,7 +230,7 @@ export function Settings() {
           <div className="text-red-500 text-xl mb-4">⚠️ Error</div>
           <div className="text-slate-400 mb-4">{error || 'Failed to load settings'}</div>
           <button
-            onClick={loadConfig}
+            onClick={() => window.location.reload()}
             className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
           >
             Retry
@@ -204,7 +242,7 @@ export function Settings() {
 
   // Group config by category
   const categories: Record<string, ConfigItem[]> = {};
-  Object.values(config).forEach(item => {
+  (Object.values(config) as ConfigItem[]).forEach((item: ConfigItem) => {
     if (!categories[item.category]) {
       categories[item.category] = [];
     }
@@ -221,15 +259,27 @@ export function Settings() {
         </div>
         <button
           onClick={handleSave}
-          disabled={saving || Object.keys(editedValues).length === 0}
+          disabled={updateConfigMutation.isPending || Object.keys(editedValues).length === 0}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg transition-colors"
         >
           <Save className="w-4 h-4" />
-          {saving ? 'Saving...' : 'Save Changes'}
+          {updateConfigMutation.isPending ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
 
       {/* Alerts */}
+      {/* Restart Required Warning - Always visible */}
+      <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4 flex items-start gap-3">
+        <AlertCircle className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+        <div>
+          <div className="text-sm font-medium text-blue-200 mb-1">Configuration Changes Require Bot Restart</div>
+          <div className="text-xs text-blue-300">
+            Changes to settings are saved to the .env file but won't take effect until you restart the bot process. 
+            The bot must be restarted manually to reload configuration values.
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -275,6 +325,134 @@ export function Settings() {
           </div>
         </div>
       ))}
+
+      {/* Emergency Controls - Kill Switch (only shown if real trading mode) */}
+      {config && config['TRADING_MODE']?.value === 'real' && (
+        <div className="bg-slate-800 rounded-lg border border-orange-700 overflow-hidden">
+          <div className="bg-orange-900/20 px-6 py-3 border-b border-orange-700">
+            <h2 className="text-lg font-semibold text-orange-400 flex items-center gap-2">
+              <Shield className="w-5 h-5" />
+              Emergency Controls
+            </h2>
+          </div>
+          <div className="p-6 space-y-4">
+            {/* Dry Run Mode Banner */}
+            {safetyStatus?.dryRunMode && (
+              <div className="bg-blue-900/30 border border-blue-600 rounded-lg p-4 flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-blue-400" />
+                <div>
+                  <div className="text-sm font-medium text-blue-200">DRY RUN MODE ACTIVE</div>
+                  <div className="text-xs text-blue-300">Trades are logged but NOT executed on Polymarket</div>
+                </div>
+              </div>
+            )}
+
+            {/* Kill Switch Status */}
+            <div className="flex justify-between items-start pb-4 border-b border-slate-700">
+              <div>
+                <h3 className="text-sm font-medium text-slate-200 flex items-center gap-2">
+                  {killSwitchStatus.activated ? (
+                    <>
+                      <AlertTriangle className="w-4 h-4 text-red-500" />
+                      Kill Switch: ACTIVE
+                    </>
+                  ) : (
+                    <>
+                      <Shield className="w-4 h-4 text-green-500" />
+                      Kill Switch: Inactive
+                    </>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  {killSwitchStatus.activated 
+                    ? 'All real trading is currently disabled. Open orders have been cancelled.'
+                    : 'Emergency stop is ready if needed. Click to immediately cancel all orders and disable trading.'}
+                </p>
+                {killSwitchStatus.activated && killSwitchStatus.activatedAt && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Activated: {new Date(killSwitchStatus.activatedAt).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => {
+                  setKillSwitchAction(killSwitchStatus.activated ? 'deactivate' : 'activate');
+                  setShowKillSwitchDialog(true);
+                }}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-lg transition-colors
+                  ${killSwitchStatus.activated 
+                    ? 'bg-green-600 hover:bg-green-700' 
+                    : 'bg-red-600 hover:bg-red-700'}
+                `}
+              >
+                <AlertTriangle className="w-4 h-4" />
+                {killSwitchStatus.activated ? 'Reactivate Trading' : 'Emergency Stop'}
+              </button>
+            </div>
+
+            {/* Safety Status */}
+            {safetyStatus && (
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-400">Trading Hours Status</p>
+                  <p className={`font-medium ${safetyStatus.withinTradingHours ? 'text-green-400' : 'text-yellow-400'}`}>
+                    {safetyStatus.withinTradingHours ? 'Active' : 'Outside Hours'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Daily Budget</p>
+                  <p className="font-medium text-white">
+                    ${safeToFixed(safetyStatus.remainingBudget, 2)} / ${safeToFixed(safetyStatus.dailyLimit, 2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Today's Spending</p>
+                  <p className="font-medium text-white">
+                    ${safeToFixed(safetyStatus.todaySpending, 2)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Trading Status</p>
+                  <p className={`font-medium ${safetyStatus.tradingEnabled && !killSwitchStatus.activated ? 'text-green-400' : 'text-red-400'}`}>
+                    {safetyStatus.tradingEnabled && !killSwitchStatus.activated ? 'Enabled' : 'Disabled'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Kill Switch</p>
+                  <p className={`font-medium ${safetyStatus.killSwitchEnabled ? 'text-red-400' : 'text-green-400'}`}>
+                    {safetyStatus.killSwitchEnabled ? 'Active' : 'Inactive'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Dry Run Mode</p>
+                  <p className={`font-medium ${safetyStatus.dryRunMode ? 'text-blue-400' : 'text-slate-500'}`}>
+                    {safetyStatus.dryRunMode ? 'Enabled' : 'Disabled'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Slippage Limit</p>
+                  <p className="font-medium text-white">
+                    {config && config['REAL_TRADING_MAX_SLIPPAGE_PERCENT']?.value 
+                      ? `${config['REAL_TRADING_MAX_SLIPPAGE_PERCENT'].value}%`
+                      : '2%'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-400">Confirmation Delay</p>
+                  <p className="font-medium text-white">
+                    {config && config['REAL_TRADING_CONFIRMATION_DELAY_MS']?.value 
+                      ? (Number(config['REAL_TRADING_CONFIRMATION_DELAY_MS'].value) === 0 
+                          ? 'Instant' 
+                          : formatMs(Number(config['REAL_TRADING_CONFIRMATION_DELAY_MS'].value)))
+                      : 'Instant'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Danger Zone - Reset Trading Data */}
       <div className="bg-slate-800 rounded-lg border border-red-700 overflow-hidden">
@@ -328,17 +506,17 @@ export function Settings() {
             <div className="flex gap-3 justify-end mt-6">
               <button
                 onClick={() => setShowResetDialog(false)}
-                disabled={resetting}
+                disabled={resetData.isPending}
                 className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleReset}
-                disabled={resetting}
+                disabled={resetData.isPending}
                 className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
               >
-                {resetting ? (
+                {resetData.isPending ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                     Resetting...
@@ -347,6 +525,73 @@ export function Settings() {
                   <>
                     <Trash2 className="w-4 h-4" />
                     Yes, Reset Data
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kill Switch Confirmation Dialog */}
+      {showKillSwitchDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 max-w-md w-full mx-4">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertTriangle className={`w-6 h-6 flex-shrink-0 mt-0.5 ${killSwitchAction === 'activate' ? 'text-red-500' : 'text-green-500'}`} />
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-2">
+                  {killSwitchAction === 'activate' ? 'Activate Kill Switch?' : 'Deactivate Kill Switch?'}
+                </h3>
+                <p className="text-sm text-slate-300 mb-2">
+                  {killSwitchAction === 'activate' ? (
+                    <>This will immediately:</>
+                  ) : (
+                    <>This will allow real trading to resume.</>
+                  )}
+                </p>
+                {killSwitchAction === 'activate' && (
+                  <ul className="text-sm text-slate-400 list-disc list-inside space-y-1 mb-4">
+                    <li>Cancel ALL open orders</li>
+                    <li>Disable real trading</li>
+                    <li>Require manual reactivation</li>
+                  </ul>
+                )}
+                <p className="text-sm text-yellow-300 font-medium">
+                  {killSwitchAction === 'activate' 
+                    ? 'This is an emergency stop. Only use if you need to halt trading immediately.'
+                    : 'Make sure you want to resume real trading before proceeding.'}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 justify-end mt-6">
+              <button
+                onClick={() => setShowKillSwitchDialog(false)}
+                disabled={killSwitchLoading}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleKillSwitch(killSwitchAction)}
+                disabled={killSwitchLoading}
+                className={`
+                  flex items-center gap-2 px-4 py-2 rounded-lg transition-colors disabled:opacity-50
+                  ${killSwitchAction === 'activate' 
+                    ? 'bg-red-600 hover:bg-red-700' 
+                    : 'bg-green-600 hover:bg-green-700'}
+                `}
+              >
+                {killSwitchLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="w-4 h-4" />
+                    {killSwitchAction === 'activate' ? 'Yes, Activate Kill Switch' : 'Yes, Reactivate Trading'}
                   </>
                 )}
               </button>

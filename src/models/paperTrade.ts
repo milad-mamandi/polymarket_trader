@@ -36,10 +36,12 @@ export function insertPaperTrade(trade: PaperTradeInsert): void {
   const stmt = db.prepare(`
     INSERT INTO paper_trades (
       id, triggered_by, market_id, market_title, outcome, 
-      entry_price, virtual_amount, shares, confidence_score, detected_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      entry_price, virtual_amount, shares, confidence_score, detected_at, timestamp
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
+  const now = new Date().toISOString();
+  
   stmt.run(
     trade.id,
     trade.triggered_by,
@@ -49,7 +51,9 @@ export function insertPaperTrade(trade: PaperTradeInsert): void {
     trade.entry_price,
     trade.virtual_amount,
     trade.shares,
-    trade.confidence_score
+    trade.confidence_score,
+    now,
+    now
   );
 }
 
@@ -75,6 +79,14 @@ export function getAllPaperTrades(limit = 100): PaperTrade[] {
     LIMIT ?
   `);
   return stmt.all(limit) as PaperTrade[];
+}
+
+/**
+ * Get a single paper trade by ID
+ */
+export function getPaperTradeById(tradeId: string): PaperTrade | undefined {
+  const stmt = db.prepare('SELECT * FROM paper_trades WHERE id = ?');
+  return stmt.get(tradeId) as PaperTrade | undefined;
 }
 
 /**
@@ -177,4 +189,18 @@ export function getPaperTradeStats() {
     completed,
     winRate,
   };
+}
+
+/**
+ * Get total amount in open positions
+ * @returns Sum of virtual_amount for all OPEN trades
+ */
+export function getOpenPositionsTotalAmount(): number {
+  const result = db.prepare(`
+    SELECT SUM(virtual_amount) as total
+    FROM paper_trades
+    WHERE status = 'OPEN'
+  `).get() as { total: number | null } | undefined;
+  
+  return result?.total ?? 0;
 }
