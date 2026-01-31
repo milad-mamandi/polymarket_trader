@@ -1,6 +1,6 @@
 import { BetRating } from './betRater.js';
 import { Trade } from './polymarket/types.js';
-import { insertPaperTrade, getOpenPaperTrades, getPaperTradeStats } from '../models/paperTrade.js';
+import { insertPaperTrade, getOpenPaperTrades, getPaperTradeStats, checkExistingMarketTrade } from '../models/paperTrade.js';
 import { CONFIG } from '../config/settings.js';
 import { logger, logTrade } from '../utils/logger.js';
 import { generateId, formatUSD, timeAgo, truncateAddress } from '../utils/helpers.js';
@@ -86,6 +86,29 @@ export class TradeEngine {
       };
     }
 
+    // CRITICAL: Check for duplicate trades across ALL wallets (not just this one)
+    const trade = rating.trade;
+    const duplicateCheck = checkExistingMarketTrade(trade.conditionId, trade.outcome);
+    if (duplicateCheck.exists) {
+      logger.warn(`Trade blocked - ${duplicateCheck.reason}`);
+      return {
+        mode: 'paper',
+        executed: false,
+        reason: `Duplicate trade blocked: ${duplicateCheck.reason}`,
+      };
+    }
+
+    // CRITICAL: Validate market status before executing
+    const marketValidation = await this.validateMarketForTrading(trade.conditionId);
+    if (!marketValidation.isValid) {
+      logger.warn(`Trade blocked - ${marketValidation.reason}: ${trade.title}`);
+      return {
+        mode: 'paper',
+        executed: false,
+        reason: `Market validation failed: ${marketValidation.reason}`,
+      };
+    }
+
     // Calculate position size using Kelly Criterion
     const positionSize = this.calculateKellyPosition(rating);
     
@@ -121,7 +144,6 @@ export class TradeEngine {
     }
 
     // Execute the paper trade
-    const trade = rating.trade;
     const shares = positionSize / trade.price;
     const tradeId = generateId();
 
@@ -420,6 +442,58 @@ export class TradeEngine {
     }
     
     return { allowed: true };
+  }
+
+  /**
+   * Validate if a market is tradable (not ended, closed, or resolved)
+   * Additional safety check beyond what betRater already validates
+   */
+  private async validateMarketForTrading(conditionId: string): Promise<{ isValid: boolean; reason?: string }> {
+    try {
+      const market = await polymarketApi.getMarketByConditionId(conditionId, 'debug');
+      
+      if (!market) {
+        return { isValid: false, reason: 'Market not found or archived' };
+      }
+
+      // Check if market is resolved
+      if (market.resolved) {
+        return { isValid: false, reason: 'Market already resolved' };
+      }
+
+      // Check if market is closed
+      if (market.closed) {
+        return { isValid: false, reason: 'Market is closed' };
+      }
+
+      // Check if market is not active
+      if (!market.active) {
+        return { isValid: false, reason: 'Market is not active' };
+      }
+
+      // Check if market has ended (end date passed)
+      if (market.endDate) {
+        const endDate = new Date(market.endDate);
+        const now = new Date();
+        
+        if (endDate < now) {
+          return { isValid: false, reason: `Market ended on ${market.endDate}` };
+        }
+
+        // Check if market ends within 24 hours (configurable)
+        const hoursUntilEnd = (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+        if (hoursUntilEnd < 24) {
+          return { isValid: false, reason: `Market ends in ${Math.round(hoursUntilEnd)} hours (min 24h required)` };
+        }
+      }
+
+      return { isValid: true };
+    } catch (error) {
+      // If we can't fetch market data, assume it's invalid to be safe
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.warn(`Failed to validate market ${conditionId}: ${errorMessage}`);
+      return { isValid: false, reason: 'Unable to verify market status' };
+    }
   }
 
   /**

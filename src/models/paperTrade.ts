@@ -210,3 +210,44 @@ export function getOpenPositionsTotalAmount(): number {
   
   return result?.total ?? 0;
 }
+
+/**
+ * Check if there's already a trade on this market (regardless of wallet)
+ * Used to prevent duplicate trades across different wallets
+ * @param marketId - The market condition ID
+ * @param outcome - Optional outcome to check (if provided, only checks for same outcome)
+ * @returns Object with exists flag and details of existing trade if found
+ */
+export function checkExistingMarketTrade(marketId: string, outcome?: string): { 
+  exists: boolean; 
+  existingTrade?: PaperTrade;
+  reason?: string;
+} {
+  let query = `
+    SELECT * FROM paper_trades 
+    WHERE market_id = ? AND status = 'OPEN'
+  `;
+  const params: (string | number)[] = [marketId];
+  
+  if (outcome) {
+    query += ` AND outcome = ?`;
+    params.push(outcome);
+  }
+  
+  query += ` ORDER BY timestamp DESC LIMIT 1`;
+  
+  const stmt = db.prepare(query);
+  const existingTrade = stmt.get(...params) as PaperTrade | undefined;
+  
+  if (existingTrade) {
+    return {
+      exists: true,
+      existingTrade,
+      reason: outcome 
+        ? `Already have ${outcome} position on this market (ID: ${existingTrade.id})`
+        : `Already have open position on this market (ID: ${existingTrade.id})`,
+    };
+  }
+  
+  return { exists: false };
+}

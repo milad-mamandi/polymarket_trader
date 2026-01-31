@@ -4,6 +4,7 @@ import { logger } from '../utils/logger.js';
 import { clobClient } from './polymarket/clobClient.js';
 import { Side } from '@polymarket/clob-client';
 import { getTokenIdForOutcome } from './polymarket/tokenResolver.js';
+import { polymarketApi } from './polymarket/api.js';
 import {
   insertRealTrade,
   updateRealTradeOrder,
@@ -171,6 +172,52 @@ export async function executeRealTrade(params: RealTradeParams): Promise<RealTra
       logger.warn('Kill switch activated during confirmation delay - trade cancelled');
       return { success: false, error: 'Kill switch activated during delay' };
     }
+  }
+
+  // Safety check 10: Market status validation (CRITICAL - prevents trading on ended markets)
+  try {
+    const market = await polymarketApi.getMarketByConditionId(marketId, 'debug');
+    
+    if (!market) {
+      logger.warn(`Trade blocked - Market not found or archived: ${marketTitle}`);
+      return { success: false, error: 'Market not found or archived' };
+    }
+
+    if (market.resolved) {
+      logger.warn(`Trade blocked - Market already resolved: ${marketTitle}`);
+      return { success: false, error: 'Market already resolved' };
+    }
+
+    if (market.closed) {
+      logger.warn(`Trade blocked - Market is closed: ${marketTitle}`);
+      return { success: false, error: 'Market is closed' };
+    }
+
+    if (!market.active) {
+      logger.warn(`Trade blocked - Market is not active: ${marketTitle}`);
+      return { success: false, error: 'Market is not active' };
+    }
+
+    if (market.endDate) {
+      const endDate = new Date(market.endDate);
+      const now = new Date();
+      
+      if (endDate < now) {
+        logger.warn(`Trade blocked - Market ended on ${market.endDate}: ${marketTitle}`);
+        return { success: false, error: `Market ended on ${market.endDate}` };
+      }
+
+      // Check if market ends within 24 hours
+      const hoursUntilEnd = (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+      if (hoursUntilEnd < 24) {
+        logger.warn(`Trade blocked - Market ends in ${Math.round(hoursUntilEnd)} hours (min 24h required): ${marketTitle}`);
+        return { success: false, error: `Market ends in ${Math.round(hoursUntilEnd)} hours (min 24h required)` };
+      }
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Failed to validate market status: ${errorMessage}`);
+    return { success: false, error: 'Market status validation failed' };
   }
 
   // Create trade record

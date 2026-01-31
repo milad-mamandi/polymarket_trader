@@ -1,4 +1,4 @@
-import { Trade, Position } from './polymarket/types.js';
+import { Trade, Position, Market } from './polymarket/types.js';
 import { polymarketApi } from './polymarket/api.js';
 import { getWalletStats, getWallet } from '../models/wallet.js';
 import { getWalletTradesForMarket } from '../models/trade.js';
@@ -30,6 +30,13 @@ export class BetRater {
    */
   async rateBet(trade: Trade, walletSuspicionScore: number): Promise<BetRating> {
     logger.info(`Rating bet from ${trade.proxyWallet} on "${trade.title}"`);
+
+    // CRITICAL: Check market status FIRST before any calculations
+    const marketStatus = await this.validateMarketStatus(trade.conditionId);
+    if (!marketStatus.isValid) {
+      logger.warn(`Trade blocked - ${marketStatus.reason}: ${trade.title}`);
+      return this.createBlockedRating(trade, walletSuspicionScore, marketStatus.reason!);
+    }
 
     // Get wallet statistics
     const walletStats = getWalletStats(trade.proxyWallet);
@@ -74,6 +81,81 @@ export class BetRater {
     logger.info(`Bet rated: ${finalScore}/100 | Should trade: ${shouldTrade}`);
 
     return rating;
+  }
+
+  /**
+   * Validate if a market is tradable (not ended, closed, or resolved)
+   */
+  private async validateMarketStatus(conditionId: string): Promise<{ isValid: boolean; reason?: string }> {
+    try {
+      const market = await polymarketApi.getMarketByConditionId(conditionId, 'debug');
+      
+      if (!market) {
+        return { isValid: false, reason: 'Market not found or archived' };
+      }
+
+      // Check if market is resolved
+      if (market.resolved) {
+        return { isValid: false, reason: 'Market already resolved' };
+      }
+
+      // Check if market is closed
+      if (market.closed) {
+        return { isValid: false, reason: 'Market is closed' };
+      }
+
+      // Check if market is not active
+      if (!market.active) {
+        return { isValid: false, reason: 'Market is not active' };
+      }
+
+      // Check if market has ended (end date passed)
+      if (market.endDate) {
+        const endDate = new Date(market.endDate);
+        const now = new Date();
+        
+        if (endDate < now) {
+          return { isValid: false, reason: `Market ended on ${market.endDate}` };
+        }
+
+        // Check if market ends within 24 hours (configurable)
+        const hoursUntilEnd = (endDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+        if (hoursUntilEnd < 24) {
+          return { isValid: false, reason: `Market ends in ${Math.round(hoursUntilEnd)} hours (min 24h required)` };
+        }
+      }
+
+      return { isValid: true };
+    } catch (error) {
+      // If we can't fetch market data, assume it's invalid to be safe
+      logger.warn(`Failed to validate market status for ${conditionId}, blocking trade`);
+      return { isValid: false, reason: 'Unable to verify market status' };
+    }
+  }
+
+  /**
+   * Create a blocked rating when market is invalid
+   */
+  private createBlockedRating(trade: Trade, walletSuspicionScore: number, reason: string): BetRating {
+    return {
+      trade,
+      walletAddress: trade.proxyWallet,
+      walletScore: Math.round(walletSuspicionScore * 0.5),
+      marketConfidence: 0,
+      sizeSignal: 0,
+      timingScore: 0,
+      consensusScore: 0,
+      finalScore: 0,
+      breakdown: {
+        'Status': `BLOCKED: ${reason}`,
+        'Wallet Score': 'N/A (market invalid)',
+        'Size Signal': 'N/A (market invalid)',
+        'Market Quality': 'N/A (market invalid)',
+        'Timing': 'N/A (market invalid)',
+        'Consensus': 'N/A (market invalid)',
+      },
+      shouldTrade: false,
+    };
   }
 
   /**
