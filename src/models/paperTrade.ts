@@ -5,6 +5,8 @@ export interface PaperTrade {
   triggered_by: string;
   market_id: string;
   market_title: string;
+  market_slug?: string;
+  market_end_date?: string;
   outcome: string;
   entry_price: number;
   virtual_amount: number;
@@ -22,6 +24,8 @@ export interface PaperTradeInsert {
   triggered_by: string;
   market_id: string;
   market_title: string;
+  market_slug?: string;
+  market_end_date?: string;
   outcome: string;
   entry_price: number;
   virtual_amount: number;
@@ -35,9 +39,9 @@ export interface PaperTradeInsert {
 export function insertPaperTrade(trade: PaperTradeInsert): void {
   const stmt = db.prepare(`
     INSERT INTO paper_trades (
-      id, triggered_by, market_id, market_title, outcome, 
+      id, triggered_by, market_id, market_title, market_slug, market_end_date, outcome, 
       entry_price, virtual_amount, shares, confidence_score, detected_at, timestamp
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const now = new Date().toISOString();
@@ -47,6 +51,8 @@ export function insertPaperTrade(trade: PaperTradeInsert): void {
     trade.triggered_by,
     trade.market_id,
     trade.market_title,
+    trade.market_slug || null,
+    trade.market_end_date || null,
     trade.outcome,
     trade.entry_price,
     trade.virtual_amount,

@@ -27,6 +27,11 @@ const EDITABLE_CONFIG = [
   { key: 'INITIAL_PAPER_BALANCE', type: 'number', category: 'Trading', description: 'Starting paper trading balance (USD)', min: 1000, max: 1000000 },
   { key: 'MAX_POSITION_SIZE_PERCENT', type: 'number', category: 'Trading', description: 'Max % of balance per trade', min: 1, max: 100 },
   
+  // Kelly Criterion
+  { key: 'KELLY_FRACTION', type: 'number', category: 'Kelly Criterion', description: 'Fractional Kelly multiplier (0.5 = half-Kelly)', min: 0.1, max: 1.0 },
+  { key: 'MIN_TRADE_AMOUNT_USD', type: 'number', category: 'Kelly Criterion', description: 'Minimum trade amount (USD) - skip smaller trades', min: 1, max: 100 },
+  { key: 'MAX_KELLY_BET_PERCENT', type: 'number', category: 'Kelly Criterion', description: 'Cap Kelly bets at this % of bankroll', min: 1, max: 50 },
+  
   // Timing
   { key: 'TRADE_POLL_INTERVAL_MS', type: 'number', category: 'Timing', description: 'How often to scan for new trades (ms)', min: 5000, max: 300000 },
   { key: 'RESOLUTION_CHECK_INTERVAL_MS', type: 'number', category: 'Timing', description: 'How often to check for resolved markets (ms)', min: 60000, max: 3600000 },

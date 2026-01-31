@@ -103,6 +103,8 @@ export interface Trade {
   id: string;
   market_title: string;
   market_id: string;
+  market_slug?: string;
+  market_end_date?: string | null;
   outcome: string;
   entry_price: number;
   exit_price?: number | null;

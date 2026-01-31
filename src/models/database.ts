@@ -179,6 +179,34 @@ export function initializeDatabase(): void {
     logger.error(`Migration error for detected_at: ${errorMessage}`);
   }
 
+  // Migration: Add market_slug column to paper_trades if it doesn't exist
+  try {
+    const tableInfo = db.pragma('table_info(paper_trades)') as Array<{ name: string }>;
+    const hasMarketSlug = tableInfo.some(col => col.name === 'market_slug');
+    
+    if (!hasMarketSlug) {
+      db.exec('ALTER TABLE paper_trades ADD COLUMN market_slug TEXT');
+      logger.info('Migration: Added market_slug column to paper_trades table');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Migration error for market_slug: ${errorMessage}`);
+  }
+
+  // Migration: Add market_end_date column to paper_trades if it doesn't exist
+  try {
+    const tableInfo = db.pragma('table_info(paper_trades)') as Array<{ name: string }>;
+    const hasMarketEndDate = tableInfo.some(col => col.name === 'market_end_date');
+    
+    if (!hasMarketEndDate) {
+      db.exec('ALTER TABLE paper_trades ADD COLUMN market_end_date TEXT');
+      logger.info('Migration: Added market_end_date column to paper_trades table');
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`Migration error for market_end_date: ${errorMessage}`);
+  }
+
   // Performance metrics table
   db.exec(`
     CREATE TABLE IF NOT EXISTS performance (

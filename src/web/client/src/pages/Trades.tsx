@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { formatUSD, formatPercent, timeAgo, safeToFixed } from '../lib/utils';
-import { Filter, Download, X, ExternalLink, TrendingUp, TrendingDown } from 'lucide-react';
+import { Filter, Download, X, ExternalLink, TrendingUp, TrendingDown, ArrowUpDown, ArrowUp, ArrowDown, Clock } from 'lucide-react';
 import { useTrades } from '../hooks/useQueries';
 import type { Trade } from '../lib/types';
 
@@ -14,15 +14,80 @@ export function Trades() {
   // Filters (local UI state)
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [quickFilter, setQuickFilter] = useState<string>('all');
+  
+  // Sorting (local UI state)
+  const [sortColumn, setSortColumn] = useState<string>('timestamp');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   
   // Pagination (local UI state)
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(20);
 
+  // Helper function to format end date
+  const formatEndDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return '-';
+    try {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diffMs = date.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (diffDays < 0) return 'Closed';
+      if (diffDays === 0) return 'Today';
+      if (diffDays === 1) return 'Tomorrow';
+      if (diffDays < 7) return `${diffDays}d`;
+      if (diffDays < 30) return `${Math.floor(diffDays / 7)}w`;
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch {
+      return '-';
+    }
+  };
+
+  // Helper function to check if closing soon (within 24 hours)
+  const isClosingSoon = (dateStr: string | null | undefined): boolean => {
+    if (!dateStr) return false;
+    try {
+      const date = new Date(dateStr);
+      const now = new Date();
+      const diffHours = (date.getTime() - now.getTime()) / (1000 * 60 * 60);
+      return diffHours >= 0 && diffHours < 24;
+    } catch {
+      return false;
+    }
+  };
+
+  // Apply quick filters
+  const applyQuickFilter = (trade: Trade): boolean => {
+    if (quickFilter === 'all') return true;
+    if (!trade.market_end_date) return false;
+    
+    try {
+      const endDate = new Date(trade.market_end_date);
+      const now = new Date();
+      const diffMs = endDate.getTime() - now.getTime();
+      const diffHours = diffMs / (1000 * 60 * 60);
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (quickFilter === 'today') return diffHours >= 0 && diffHours < 24;
+      if (quickFilter === 'week') return diffDays >= 0 && diffDays <= 7;
+      if (quickFilter === 'soon') return diffHours >= 0 && diffHours < 48;
+    } catch {
+      return false;
+    }
+    
+    return true;
+  };
+
   // Filter trades
   const filteredTrades = trades.filter((trade: Trade) => {
     // Status filter
     if (statusFilter !== 'all' && trade.status !== statusFilter) {
+      return false;
+    }
+    
+    // Quick filter
+    if (!applyQuickFilter(trade)) {
       return false;
     }
     
@@ -39,19 +104,78 @@ export function Trades() {
     return true;
   });
 
+  // Sort trades
+  const sortedTrades = [...filteredTrades].sort((a, b) => {
+    let aVal: any;
+    let bVal: any;
+    
+    switch (sortColumn) {
+      case 'market_end_date':
+        aVal = a.market_end_date ? new Date(a.market_end_date).getTime() : 0;
+        bVal = b.market_end_date ? new Date(b.market_end_date).getTime() : 0;
+        break;
+      case 'timestamp':
+        aVal = new Date(a.timestamp).getTime();
+        bVal = new Date(b.timestamp).getTime();
+        break;
+      case 'virtual_amount':
+        aVal = a.virtual_amount;
+        bVal = b.virtual_amount;
+        break;
+      case 'confidence_score':
+        aVal = a.confidence_score;
+        bVal = b.confidence_score;
+        break;
+      case 'pnl':
+        aVal = a.pnl || 0;
+        bVal = b.pnl || 0;
+        break;
+      default:
+        aVal = 0;
+        bVal = 0;
+    }
+    
+    if (sortDirection === 'asc') {
+      return aVal > bVal ? 1 : -1;
+    } else {
+      return aVal < bVal ? 1 : -1;
+    }
+  });
+
   // Paginate
-  const totalPages = Math.ceil(filteredTrades.length / itemsPerPage);
+  const totalPages = Math.ceil(sortedTrades.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedTrades = filteredTrades.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedTrades = sortedTrades.slice(startIndex, startIndex + itemsPerPage);
+
+  // Toggle sort column
+  const toggleSort = (column: string) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('desc');
+    }
+  };
+
+  // Sort icon component
+  const SortIcon = ({ column }: { column: string }) => {
+    if (sortColumn !== column) {
+      return <ArrowUpDown className="h-3 w-3 ml-1 inline opacity-50" />;
+    }
+    return sortDirection === 'asc' 
+      ? <ArrowUp className="h-3 w-3 ml-1 inline" />
+      : <ArrowDown className="h-3 w-3 ml-1 inline" />;
+  };
 
   // Export to CSV
   function exportToCSV() {
-    const headers = ['ID', 'Market', 'Outcome', 'Status', 'Entry Price', 'Exit Price', 'Amount', 'Shares', 'P&L', 'Confidence', 'Triggered By', 'Timestamp'];
-    const rows = filteredTrades.map((t: Trade) => [
+    const headers = ['ID', 'Market', 'Outcome', 'Status', 'Closes', 'Entry Price', 'Exit Price', 'Amount', 'Shares', 'P&L', 'Confidence', 'Triggered By', 'Timestamp'];
+    const rows = sortedTrades.map((t: Trade) => [
       t.id,
-      `"${t.market_title}"`,
+      t.market_title,
       t.outcome,
       t.status,
+      t.market_end_date || '',
       t.entry_price,
       t.exit_price || '',
       t.virtual_amount,
@@ -99,7 +223,7 @@ export function Trades() {
         <div>
           <h1 className="text-2xl font-bold text-white">Paper Trades</h1>
           <p className="text-slate-400 mt-1">
-            Showing {filteredTrades.length} of {trades.length} trades
+            Showing {sortedTrades.length} of {trades.length} trades
           </p>
         </div>
         <button
@@ -115,10 +239,10 @@ export function Trades() {
       <div className="bg-slate-800 rounded-lg p-4 space-y-4">
         <div className="flex items-center gap-2 text-white font-semibold">
           <Filter className="h-5 w-5" />
-          Filters
+          Filters & Sorting
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Search */}
           <div>
             <label className="block text-sm text-slate-400 mb-2">Search</label>
@@ -152,6 +276,96 @@ export function Trades() {
               <option value="CANCELLED">Cancelled</option>
             </select>
           </div>
+
+          {/* Sort By */}
+          <div>
+            <label className="block text-sm text-slate-400 mb-2">Sort By</label>
+            <select
+              value={sortColumn}
+              onChange={(e) => setSortColumn(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="timestamp">Trade Date</option>
+              <option value="market_end_date">End Date</option>
+              <option value="virtual_amount">Amount</option>
+              <option value="confidence_score">Confidence</option>
+              <option value="pnl">P&L</option>
+            </select>
+          </div>
+
+          {/* Sort Direction */}
+          <div>
+            <label className="block text-sm text-slate-400 mb-2">Direction</label>
+            <select
+              value={sortDirection}
+              onChange={(e) => setSortDirection(e.target.value as 'asc' | 'desc')}
+              className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Quick Filters */}
+        <div>
+          <label className="block text-sm text-slate-400 mb-2">Quick Filters</label>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => {
+                setQuickFilter('all');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                quickFilter === 'all'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              All Trades
+            </button>
+            <button
+              onClick={() => {
+                setQuickFilter('today');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                quickFilter === 'today'
+                  ? 'bg-yellow-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              <Clock className="h-3 w-3 inline mr-1" />
+              Closing Today
+            </button>
+            <button
+              onClick={() => {
+                setQuickFilter('soon');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                quickFilter === 'soon'
+                  ? 'bg-yellow-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              <Clock className="h-3 w-3 inline mr-1" />
+              Closing Soon (48h)
+            </button>
+            <button
+              onClick={() => {
+                setQuickFilter('week');
+                setCurrentPage(1);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                quickFilter === 'week'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              This Week
+            </button>
+          </div>
         </div>
       </div>
 
@@ -164,17 +378,48 @@ export function Trades() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">Market</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">Outcome</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">Status</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">Entry</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">Amount</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">P&L</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase">Confidence</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase">Time</th>
+                <th 
+                  className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('market_end_date')}
+                >
+                  Closes <SortIcon column="market_end_date" />
+                </th>
+                <th 
+                  className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('entry_price')}
+                >
+                  Entry <SortIcon column="entry_price" />
+                </th>
+                <th 
+                  className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('virtual_amount')}
+                >
+                  Amount <SortIcon column="virtual_amount" />
+                </th>
+                <th 
+                  className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('pnl')}
+                >
+                  P&L <SortIcon column="pnl" />
+                </th>
+                <th 
+                  className="px-4 py-3 text-right text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('confidence_score')}
+                >
+                  Confidence <SortIcon column="confidence_score" />
+                </th>
+                <th 
+                  className="px-4 py-3 text-left text-xs font-semibold text-slate-300 uppercase cursor-pointer hover:text-white transition-colors"
+                  onClick={() => toggleSort('timestamp')}
+                >
+                  Time <SortIcon column="timestamp" />
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700">
               {paginatedTrades.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                     No trades found
                   </td>
                 </tr>
@@ -195,6 +440,15 @@ export function Trades() {
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={trade.status} />
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {trade.market_end_date ? (
+                        <span className={isClosingSoon(trade.market_end_date) ? 'text-yellow-400 font-semibold' : 'text-slate-300'}>
+                          {formatEndDate(trade.market_end_date)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">-</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-300 text-right">
                       {formatPercent(trade.entry_price)}
@@ -276,7 +530,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function TradeModal({ trade, onClose }: { trade: Trade; onClose: () => void }) {
-  const marketUrl = `https://polymarket.com/event/${trade.market_id}`;
+  // Use market_slug if available, fallback to market_id for older trades
+  const marketUrl = trade.market_slug 
+    ? `https://polymarket.com/event/${trade.market_slug}`
+    : `https://polymarket.com/event/${trade.market_id}`;
   const walletUrl = `https://polygonscan.com/address/${trade.triggered_by}`;
 
   return (

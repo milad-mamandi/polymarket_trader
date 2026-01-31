@@ -32,6 +32,11 @@ export const CONFIG = {
   INITIAL_PAPER_BALANCE: Number(process.env.INITIAL_PAPER_BALANCE) || 10000,
   MAX_POSITION_SIZE_PERCENT: Number(process.env.MAX_POSITION_SIZE_PERCENT) || 10,
   
+  // Kelly Criterion Bankroll Management
+  KELLY_FRACTION: Number(process.env.KELLY_FRACTION) || 0.5, // Fractional Kelly (0.5 = half-Kelly)
+  MIN_TRADE_AMOUNT_USD: Number(process.env.MIN_TRADE_AMOUNT_USD) || 5, // Skip trades below this
+  MAX_KELLY_BET_PERCENT: Number(process.env.MAX_KELLY_BET_PERCENT) || 10, // Cap Kelly bets at this %
+  
   // Real Trading Mode
   TRADING_MODE: (process.env.TRADING_MODE as 'paper' | 'real') || 'paper',
   REAL_TRADING_ENABLED: process.env.TRADING_MODE === 'real',

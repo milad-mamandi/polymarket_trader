@@ -7,6 +7,7 @@ import { generateId, formatUSD, timeAgo, truncateAddress } from '../utils/helper
 import { getWalletStats } from '../models/wallet.js';
 import { getWebSocketManager } from '../index.js';
 import { executeRealTrade } from './realTradeExecutor.js';
+import { polymarketApi } from './polymarket/api.js';
 
 export interface PaperTradeResult {
   executed: boolean;
@@ -75,13 +76,17 @@ export class TradeEngine {
    * Execute a paper trade
    */
   private async executePaperTrade(rating: BetRating): Promise<TradeResult> {
-    // Calculate position size (percentage of portfolio)
-    const maxAmount = this.paperBalance * (CONFIG.MAX_POSITION_SIZE_PERCENT / 100);
+    // Calculate position size using Kelly Criterion
+    const positionSize = this.calculateKellyPosition(rating);
     
-    // Scale position size based on confidence
-    // Higher confidence = larger position (up to max)
-    const confidenceMultiplier = rating.finalScore / 100;
-    const positionSize = maxAmount * confidenceMultiplier;
+    // Check minimum trade amount
+    if (positionSize < CONFIG.MIN_TRADE_AMOUNT_USD) {
+      return {
+        mode: 'paper',
+        executed: false,
+        reason: `Position size ${formatUSD(positionSize)} below minimum ${formatUSD(CONFIG.MIN_TRADE_AMOUNT_USD)}`,
+      };
+    }
 
     // Check if we have enough balance
     if (positionSize > this.paperBalance) {
@@ -97,11 +102,23 @@ export class TradeEngine {
     const shares = positionSize / trade.price;
     const tradeId = generateId();
 
+    // Fetch market data to get end date (use debug level to avoid logging 422s)
+    let marketEndDate: string | null = null;
+    try {
+      const market = await polymarketApi.getMarketByConditionId(trade.conditionId, 'debug');
+      marketEndDate = market?.endDate || null;
+    } catch (error) {
+      // Silently fail - end date is optional
+      logger.debug(`Could not fetch market end date for ${trade.conditionId}`);
+    }
+
     insertPaperTrade({
       id: tradeId,
       triggered_by: rating.walletAddress,
       market_id: trade.conditionId,
       market_title: trade.title,
+      market_slug: trade.eventSlug,
+      market_end_date: marketEndDate || undefined,
       outcome: trade.outcome,
       entry_price: trade.price,
       virtual_amount: positionSize,
@@ -135,13 +152,20 @@ export class TradeEngine {
   private async executeRealTrade(rating: BetRating): Promise<TradeResult> {
     const trade = rating.trade;
     
-    // Calculate position size using same logic as paper trading
-    const maxAmount = CONFIG.INITIAL_PAPER_BALANCE * (CONFIG.MAX_POSITION_SIZE_PERCENT / 100);
-    const confidenceMultiplier = rating.finalScore / 100;
-    const positionSize = maxAmount * confidenceMultiplier;
+    // Calculate position size using Kelly Criterion
+    const positionSize = this.calculateKellyPosition(rating);
 
     // Ensure position size doesn't exceed max real trading limit
     const amountUsd = Math.min(positionSize, CONFIG.REAL_TRADING_MAX_POSITION_USD);
+    
+    // Check minimum trade amount
+    if (amountUsd < CONFIG.MIN_TRADE_AMOUNT_USD) {
+      return {
+        mode: 'real',
+        executed: false,
+        reason: `Position size ${formatUSD(amountUsd)} below minimum ${formatUSD(CONFIG.MIN_TRADE_AMOUNT_USD)}`,
+      };
+    }
 
     // Execute real trade via CLOB
     const result = await executeRealTrade({
@@ -179,6 +203,57 @@ export class TradeEngine {
       amount: amountUsd,
       shares,
     };
+  }
+
+  /**
+   * Calculate position size using Kelly Criterion
+   * 
+   * Kelly formula: f* = (bp - q) / b
+   * Where:
+   * - f* = fraction of bankroll to bet
+   * - b = odds received (payout ratio = 1/price - 1)
+   * - p = probability of winning
+   * - q = probability of losing (1 - p)
+   * 
+   * We derive win probability from confidence score and market price
+   */
+  private calculateKellyPosition(rating: BetRating): number {
+    const trade = rating.trade;
+    const price = trade.price;
+    
+    // Market implied probability
+    const impliedProb = price;
+    
+    // Our estimated edge based on confidence score
+    // High confidence (e.g., 90%) suggests we have an edge over market
+    const confidenceProb = rating.finalScore / 100;
+    
+    // Calculate our adjusted probability (blend confidence with market)
+    // If confidence is 90% and market is 60%, we think true prob is around 75%
+    const edgeAdjustment = (confidenceProb - impliedProb) * 0.5;
+    const winProb = Math.min(0.95, Math.max(0.05, impliedProb + edgeAdjustment));
+    
+    // Calculate payout odds: if price is 0.6, you win 1/0.6 - 1 = 0.667 (66.7% profit)
+    const payoutOdds = (1 / price) - 1;
+    
+    // Kelly Criterion: (odds * p - q) / odds
+    const lossProb = 1 - winProb;
+    const kellyFraction = (payoutOdds * winProb - lossProb) / payoutOdds;
+    
+    // Apply fractional Kelly (e.g., 0.5 = half-Kelly for reduced variance)
+    const fractionalKelly = Math.max(0, kellyFraction * CONFIG.KELLY_FRACTION);
+    
+    // Calculate position size
+    let positionSize = this.paperBalance * fractionalKelly;
+    
+    // Apply maximum bet percentage cap
+    const maxBet = this.paperBalance * (CONFIG.MAX_KELLY_BET_PERCENT / 100);
+    positionSize = Math.min(positionSize, maxBet);
+    
+    // Log Kelly calculation for debugging
+    logger.debug(`Kelly calculation: price=${price.toFixed(3)}, confidence=${rating.finalScore}%, winProb=${(winProb*100).toFixed(1)}%, kelly=${(kellyFraction*100).toFixed(1)}%, fractional=${(fractionalKelly*100).toFixed(1)}%, size=${formatUSD(positionSize)}`);
+    
+    return positionSize;
   }
 
   /**
