@@ -1,11 +1,14 @@
 import winston from 'winston';
-import { CONFIG } from '../config/settings.js';
 import fs from 'fs';
 import path from 'path';
 
+const LOG_DIR = process.env.LOG_DIR || './logs';
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+const LOG_TO_FILE = true;
+
 // Ensure log directory exists
-if (!fs.existsSync(CONFIG.LOG_DIR)) {
-  fs.mkdirSync(CONFIG.LOG_DIR, { recursive: true });
+if (!fs.existsSync(LOG_DIR)) {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
 }
 
 // Custom JSON replacer to handle circular references
@@ -40,7 +43,7 @@ const logFormat = winston.format.combine(
 );
 
 export const logger = winston.createLogger({
-  level: CONFIG.LOG_LEVEL,
+  level: LOG_LEVEL,
   format: logFormat,
   transports: [
     new winston.transports.Console({
@@ -49,15 +52,15 @@ export const logger = winston.createLogger({
         logFormat
       ),
     }),
-    ...(CONFIG.LOG_TO_FILE
+    ...(LOG_TO_FILE
       ? [
           new winston.transports.File({
-            filename: path.join(CONFIG.LOG_DIR, 'app.log'),
+            filename: path.join(LOG_DIR, 'app.log'),
             maxsize: 10485760, // 10MB
             maxFiles: 5,
           }),
           new winston.transports.File({
-            filename: path.join(CONFIG.LOG_DIR, 'trades.log'),
+            filename: path.join(LOG_DIR, 'trades.log'),
             level: 'info',
             maxsize: 10485760,
             maxFiles: 5,
@@ -84,6 +87,8 @@ export function logTrade(details: {
   potentialPayout: number;
   risk: number;
 }) {
+  const initialBalance = Number(process.env.INITIAL_PAPER_BALANCE) || 10000;
+  
   const tradeLog = `
 ════════════════════════════════════════════
 PAPER TRADE EXECUTED
@@ -102,7 +107,7 @@ ${Object.entries(details.confidenceBreakdown)
   .join('\n')}
 
 Paper Trade Details:
-  - Virtual Amount: $${details.virtualAmount.toFixed(2)} (${(details.virtualAmount / CONFIG.INITIAL_PAPER_BALANCE * 100).toFixed(1)}% of portfolio)
+  - Virtual Amount: $${details.virtualAmount.toFixed(2)} (${(details.virtualAmount / initialBalance * 100).toFixed(1)}% of portfolio)
   - Shares Purchased: ${details.shares.toFixed(2)}
   - Potential Payout: $${details.potentialPayout.toFixed(2)} (if ${details.outcome} wins)
   - Risk: $${details.risk.toFixed(2)} (if ${details.outcome} loses)

@@ -136,7 +136,7 @@ export function Settings() {
           <input
             type="number"
             value={typeof currentValue === 'number' ? currentValue : ''}
-            onChange={(e) => handleChange(item.key, e.target.value)}
+            onChange={(e) => handleChange(item.key, e.target.value === '' ? '' : Number(e.target.value))}
             min={item.min}
             max={item.max}
             className={`

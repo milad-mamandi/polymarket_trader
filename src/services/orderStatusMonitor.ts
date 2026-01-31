@@ -2,10 +2,14 @@ import { clobClient, OrderStatus as ClobOrderStatus } from './polymarket/clobCli
 import { 
   getOpenRealTrades, 
   getRealTradeById, 
-  RealTrade 
+  RealTrade,
+  updateRealTradeSize
 } from '../models/realTrade.js';
 import { logger } from '../utils/logger.js';
 import { CONFIG } from '../config/settings.js';
+
+// Order timeout in milliseconds (default 60 seconds)
+const ORDER_TIMEOUT_MS = CONFIG.ORDER_STATUS_POLL_INTERVAL ? CONFIG.ORDER_STATUS_POLL_INTERVAL * 2 : 60000;
 
 /**
  * Order Status Monitor
@@ -133,6 +137,25 @@ class OrderStatusMonitor {
       const newStatus = this.mapClobStatus(orderStatus);
       const oldStatus = trade.status;
 
+      // Check for timeout on LIVE orders (if configured)
+      if (orderStatus.status === 'LIVE' && CONFIG.ORDER_TIMEOUT_SECONDS > 0) {
+        // Convert timestamp to ms if needed (Polymarket usually returns seconds)
+        const orderTimeMs = orderStatus.timestamp > 1000000000000 
+          ? orderStatus.timestamp 
+          : orderStatus.timestamp * 1000;
+        
+        const age = Date.now() - orderTimeMs;
+        const timeoutMs = CONFIG.ORDER_TIMEOUT_SECONDS * 1000;
+        
+        if (age > timeoutMs) {
+          logger.info(`Order ${trade.order_id} timed out (age: ${Math.round(age/1000)}s). Cancelling...`);
+          await clobClient.cancelOrder(trade.order_id);
+          // We return here; the status change to CANCELLED will be picked up in the next poll
+          // or we could let the flow continue, but best to let the cancellation event drive the state update
+          return;
+        }
+      }
+
       // Check if status changed
       if (newStatus !== oldStatus) {
         logger.info(
@@ -218,9 +241,31 @@ class OrderStatusMonitor {
         `);
         stmt.run(tradeId);
       } else if (newStatus === 'CANCELLED' || newStatus === 'EXPIRED') {
-        // Order cancelled/expired - mark trade as cancelled
-        const { cancelRealTrade } = await import('../models/realTrade.js');
-        cancelRealTrade(tradeId);
+        // Order cancelled/expired - check for partial fills
+        if (orderStatus.sizeFilled > 0) {
+          logger.info(`Order ${tradeId} cancelled/expired but partially filled (${orderStatus.sizeFilled}). Updating trade size and keeping OPEN.`);
+          
+          // Calculate filled amount approximation (using limit price)
+          // Ideally we'd want the average fill price but CLOB OrderStatus often just gives limit price
+          const filledShares = orderStatus.sizeFilled;
+          const filledAmountUsd = filledShares * orderStatus.price;
+          
+          // Update the trade size in DB
+          updateRealTradeSize(tradeId, filledShares, filledAmountUsd);
+          
+          // Ensure status remains OPEN
+          const stmt = db.prepare(`
+            UPDATE real_trades
+            SET status = 'OPEN'
+            WHERE id = ?
+          `);
+          stmt.run(tradeId);
+          
+        } else {
+          // Order cancelled/expired with NO fill - mark trade as cancelled
+          const { cancelRealTrade } = await import('../models/realTrade.js');
+          cancelRealTrade(tradeId);
+        }
       } else if (newStatus === 'PARTIALLY_FILLED') {
         // Still OPEN but partially filled - no status change needed
         // Could track fill progress in future enhancement

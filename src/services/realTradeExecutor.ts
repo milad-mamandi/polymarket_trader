@@ -140,18 +140,24 @@ export async function executeRealTrade(params: RealTradeParams): Promise<RealTra
     
     // Safety check 7: Slippage protection
     const maxSlippageMultiplier = 1 + (CONFIG.REAL_TRADING_MAX_SLIPPAGE_PERCENT / 100);
+    // Determine the limit price: we want to buy *up to* this price.
+    // By placing the limit order AT the max acceptable price, we create a "marketable limit order"
+    // that will match against the best available asks up to our limit.
+    // This significantly improves fill probability compared to placing at the exact best_price.
     const maxAcceptablePrice = Math.min(bestPrice * maxSlippageMultiplier, 0.99);
     
-    price = bestPrice;
+    // We use the maxAcceptablePrice as our limit price to ensure execution
+    price = maxAcceptablePrice;
     
-    logger.info(`Best price: $${bestPrice.toFixed(4)}, Max acceptable (with ${CONFIG.REAL_TRADING_MAX_SLIPPAGE_PERCENT}% slippage): $${maxAcceptablePrice.toFixed(4)}`);
+    logger.info(`Best price: $${bestPrice.toFixed(4)}, Limit price set to: $${price.toFixed(4)} (Max acceptable with ${CONFIG.REAL_TRADING_MAX_SLIPPAGE_PERCENT}% slippage)`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     logger.error(`Failed to get best price: ${errorMessage}`);
     return { success: false, error: 'Price fetch failed' };
   }
 
-  // Calculate shares to buy
+  // Calculate shares to buy based on the LIMIT price (worst case)
+  // This ensures we never spend more than amountUsd even if filled at the max price
   const shares = amountUsd / price;
   
   // Safety check 8: Minimum order size

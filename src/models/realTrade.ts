@@ -82,6 +82,22 @@ export function updateRealTradeOrder(
 }
 
 /**
+ * Update real trade size (e.g. for partial fills)
+ */
+export function updateRealTradeSize(
+  tradeId: string,
+  shares: number,
+  amountUsd: number
+): void {
+  const stmt = db.prepare(`
+    UPDATE real_trades 
+    SET shares = ?, amount_usd = ?
+    WHERE id = ?
+  `);
+  stmt.run(shares, amountUsd, tradeId);
+}
+
+/**
  * Mark real trade as failed
  */
 export function markRealTradeFailed(tradeId: string): void {

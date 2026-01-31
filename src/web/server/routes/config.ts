@@ -4,6 +4,7 @@ import { CONFIG } from '../../../config/settings.js';
 import { logger } from '../../../utils/logger.js';
 import { getKillSwitchStatus, activateKillSwitch, deactivateKillSwitch } from '../../../core/killSwitch.js';
 import { getSafetyStatus } from '../../../services/realTradeExecutor.js';
+import { setRuntimeConfigValues } from '../../../models/config.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -196,38 +197,16 @@ router.put('/', async (req: Request, res: Response) => {
       return;
     }
     
-    // Read current .env file
-    const envPath = path.resolve(process.cwd(), '.env');
-    logger.debug(`Writing to .env file: ${envPath}`);
-    let envContent = '';
-    
-    if (fs.existsSync(envPath)) {
-      envContent = fs.readFileSync(envPath, 'utf-8');
-      logger.debug(`.env file exists, size: ${envContent.length} bytes`);
-    } else {
-      logger.debug('.env file does not exist, will create new one');
+    // Save to database (supports Docker with read-only .env)
+    try {
+      setRuntimeConfigValues(validatedUpdates);
+      logger.info(`Configuration saved to database: ${Object.keys(validatedUpdates).join(', ')}`);
+    } catch (dbError) {
+      const errorMessage = dbError instanceof Error ? dbError.message : String(dbError);
+      logger.error(`Failed to save config to database: ${errorMessage}`);
+      res.status(500).json({ error: 'Failed to save configuration to database' });
+      return;
     }
-    
-    // Update or add each key
-    for (const [key, value] of Object.entries(validatedUpdates)) {
-      const regex = new RegExp(`^${key}=.*$`, 'm');
-      
-      if (regex.test(envContent)) {
-        // Update existing
-        envContent = envContent.replace(regex, `${key}=${value}`);
-        logger.debug(`Updated existing key: ${key}`);
-      } else {
-        // Add new
-        envContent += `\n${key}=${value}`;
-        logger.debug(`Added new key: ${key}`);
-      }
-    }
-    
-    // Write back to .env
-    fs.writeFileSync(envPath, envContent, 'utf-8');
-    logger.debug(`.env file written successfully`);
-    
-    logger.info(`Configuration updated: ${Object.keys(validatedUpdates).join(', ')}`);
     
     res.json({ 
       success: true, 

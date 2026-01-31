@@ -1,15 +1,16 @@
 import Database from 'better-sqlite3';
-import { CONFIG } from '../config/settings.js';
 import fs from 'fs';
 import path from 'path';
 import { logger } from '../utils/logger.js';
 
+const DATA_DIR = process.env.DATA_DIR || './data';
+
 // Ensure data directory exists
-if (!fs.existsSync(CONFIG.DATA_DIR)) {
-  fs.mkdirSync(CONFIG.DATA_DIR, { recursive: true });
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const dbPath = path.join(CONFIG.DATA_DIR, 'whale_bot.db');
+const dbPath = path.join(DATA_DIR, 'whale_bot.db');
 export const db: Database.Database = new Database(dbPath);
 
 // Enable foreign keys
@@ -233,6 +234,15 @@ export function initializeDatabase(): void {
       volume REAL,
       liquidity REAL,
       cached_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  // App config table (for runtime settings that override .env)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
