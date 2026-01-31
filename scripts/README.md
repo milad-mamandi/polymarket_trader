@@ -1,232 +1,100 @@
-# Deployment & Maintenance Scripts
+# Polymarket Whale Scout - Manager
 
-This directory contains scripts for deploying, updating, and maintaining the Polymarket Whale Scout bot.
+Interactive management script for the Polymarket Whale Scout bot.
+
+## Quick Start
+
+```bash
+./scripts/manage.sh
+```
+
+This opens an interactive menu with all management options.
+
+## Menu Options
+
+| Option | Command | Description |
+|--------|---------|-------------|
+| 1 | **Deploy** | Full deployment: pull changes, build, restart bot |
+| 2 | **Update** | Quick update: pull & build (no restart) |
+| 3 | **Setup Server** | Install Node.js, PM2, build tools, create swap |
+| 4 | **Start Bot** | Start the bot with PM2 |
+| 5 | **Stop Bot** | Stop the bot |
+| 6 | **Restart Bot** | Quick restart |
+| 7 | **View Logs** | Show PM2 or file logs |
+| 8 | **Server Status** | Check memory, disk space, bot status |
+| 9 | **Reset Database** | Clear all paper trades (⚠️ destructive) |
+| 10 | **Uninstall** | Remove bot (soft/hard/full wipe) |
+| 11 | **Exit** | Exit the manager |
+
+## Common Workflows
+
+### First Time Setup (New Server)
+```bash
+./scripts/manage.sh
+# Select: 3 (Setup Server)
+# Select: 1 (Deploy)
+```
+
+### Regular Update
+```bash
+./scripts/manage.sh
+# Select: 1 (Deploy)
+```
+
+### Quick Restart (No Build)
+```bash
+./scripts/manage.sh
+# Select: 6 (Restart Bot)
+```
+
+## Memory Requirements
+
+The build process requires significant memory. If your server has <2GB RAM:
+
+**Option A:** Use the Setup command (option 3) to automatically create 2GB swap
+**Option B:** Manually create swap:
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+```
+
+If you see "Killed" during deployment, you need more swap.
+
+## Troubleshooting
+
+### "Killed" during build
+- Server ran out of memory
+- Run Setup (option 3) to create swap
+- Or manually create swap (see above)
+
+### Bot won't start
+- Check Server Status (option 8)
+- Ensure PM2 is installed (Setup option 3)
+- Check logs (option 7)
+
+### Database issues
+- Reset Database (option 9) to start fresh
+- This clears all paper trades but keeps wallet tracking
+
+### Permission denied
+```bash
+chmod +x scripts/manage.sh
+```
+
+## Server Requirements
+
+- **OS:** Linux (Ubuntu/Debian/CentOS)
+- **RAM:** 1GB minimum, 2GB+ recommended (or 1GB + 2GB swap)
+- **Disk:** 500MB free space
+- **Node.js:** v18+ (installed automatically by Setup)
+
+## Files
+
+- `manage.sh` - This management script
+- `reset_paper_trades.sql` - Database reset script (used by option 9)
 
 ---
 
-## 🚀 Deployment Scripts
-
-### `deploy.sh` / `deploy.ps1`
-**Full deployment with restart** - Use when deploying updates to a server.
-
-**Linux/Mac:**
-```bash
-./scripts/deploy.sh
-```
-
-**Windows:**
-```powershell
-.\scripts\deploy.ps1
-```
-
-**What it does:**
-- Stops the bot (PM2 if available)
-- Stashes local changes
-- Pulls latest from GitHub
-- Installs dependencies
-- Builds TypeScript + client
-- Checks database health (offers reset if >50 positions)
-- Restarts bot with PM2 or foreground
-
-**Requires:** Node.js, npm, git  
-**Optional:** PM2 (for background process management)
-
----
-
-### `push-and-deploy.sh` / `push-and-deploy.ps1`
-**Push changes to GitHub and deploy to remote server** - All-in-one script.
-
-**Linux/Mac:**
-```bash
-./scripts/push-and-deploy.sh
-```
-
-**Windows:**
-```powershell
-.\scripts\push-and-deploy.ps1
-```
-
-**What it does:**
-1. Shows changed files
-2. Prompts for commit message
-3. Commits and pushes to GitHub
-4. Optionally deploys to remote server via SSH
-
-**Server Configuration:**
-Add to `.env` (optional, for automatic SSH deployment):
-```env
-SERVER_HOST=your.server.com
-SERVER_USER=your-username
-SERVER_PATH=/opt/polymarket_trader
-```
-
----
-
-### `quick-update.sh`
-**Fast update without restart** - For minor updates.
-
-**Linux/Mac:**
-```bash
-./scripts/quick-update.sh
-```
-
-**What it does:**
-- Pulls latest changes
-- Installs dependencies (only if package.json changed)
-- Builds project
-- Does NOT restart bot (manual restart required)
-
-**Use when:** Making non-breaking changes that don't require immediate restart.
-
----
-
-## 🗄️ Database Scripts
-
-### `reset_paper_trades.sql`
-**Reset paper trading balance and trades** - Use when balance becomes negative or you want a fresh start.
-
-**Manual Reset:**
-```bash
-# Windows
-sqlite3 data\whale_bot.db < scripts\reset_paper_trades.sql
-
-# Linux/Mac
-sqlite3 data/whale_bot.db < scripts/reset_paper_trades.sql
-```
-
-**Automated Reset:**
-The `deploy.sh` script will automatically offer to reset if >50 open positions are detected.
-
-**What it does:**
-- Deletes all paper trades (both open and closed)
-- Resets balance to `INITIAL_PAPER_BALANCE` from config
-- Preserves wallet detection data and other tables
-
-**After resetting:**
-1. Restart the bot: `npm run dev` or `pm2 restart whale-scout`
-2. Bot starts fresh with configured initial balance
-3. Safeguards prevent over-leveraging:
-   - **Max Open Positions**: 30 (configurable)
-   - **Max Locked Capital**: 80% of initial balance
-   - **Low Balance Warning**: 20%
-
----
-
-## 🛠️ PM2 Process Management
-
-If PM2 is installed, the deployment scripts will automatically use it for background process management.
-
-**Install PM2:**
-```bash
-npm install -g pm2
-```
-
-**Useful PM2 Commands:**
-```bash
-# View status
-pm2 status whale-scout
-
-# View logs
-pm2 logs whale-scout
-
-# Restart
-pm2 restart whale-scout
-
-# Stop
-pm2 stop whale-scout
-
-# Monitor
-pm2 monit
-
-# Auto-start on boot
-pm2 startup
-pm2 save
-```
-
----
-
-## ⚙️ Configuration
-
-### Position Limits
-Edit `.env` to customize safeguards:
-```env
-MAX_OPEN_POSITIONS=30
-MAX_LOCKED_CAPITAL_PERCENT=80
-LOW_BALANCE_WARNING_PERCENT=20
-```
-
-Or adjust in the dashboard: **Settings > Position Limits**
-
-### Server Deployment
-For automatic SSH deployment, add to `.env`:
-```env
-SERVER_HOST=your.server.com
-SERVER_USER=your-username
-SERVER_PATH=/opt/polymarket_trader
-```
-
----
-
-## 📋 Quick Reference
-
-| Task | Command |
-|------|---------|
-| Deploy locally | `./scripts/deploy.sh` |
-| Push & deploy to server | `./scripts/push-and-deploy.sh` |
-| Quick update (no restart) | `./scripts/quick-update.sh` |
-| Reset database | `sqlite3 data/whale_bot.db < scripts/reset_paper_trades.sql` |
-| View logs | `tail -f logs/app.log` or `pm2 logs whale-scout` |
-| Restart bot | `pm2 restart whale-scout` or `npm run dev` |
-
----
-
-## 🔍 Troubleshooting
-
-**Script permissions (Linux/Mac):**
-```bash
-chmod +x scripts/*.sh
-```
-
-**PM2 not found:**
-```bash
-npm install -g pm2
-```
-
-**SQLite not found:**
-- Ubuntu/Debian: `sudo apt install sqlite3`
-- macOS: `brew install sqlite3`
-- Windows: Download from https://www.sqlite.org/download.html
-
-**Native module error (better-sqlite3):**
-This error occurs when `better-sqlite3` native bindings aren't built for your Node.js version:
-
-```bash
-# Fix 1: Rebuild native modules
-npm rebuild
-
-# Fix 2: Clean reinstall (if rebuild fails)
-rm -rf node_modules package-lock.json
-npm install
-
-# Fix 3: Install build tools (if npm install fails)
-# Ubuntu/Debian:
-sudo apt update
-sudo apt install build-essential python3
-
-# macOS:
-xcode-select --install
-
-# Then reinstall:
-npm install
-```
-
-The deploy scripts now automatically handle this with `npm rebuild` after `npm install`.
-
-**SSH connection fails:**
-- Check `SERVER_HOST`, `SERVER_USER`, `SERVER_PATH` in `.env`
-- Ensure SSH key authentication is set up
-- Test connection: `ssh $SERVER_USER@$SERVER_HOST`
-
----
-
-*Last Updated: January 31, 2026*
+*Run `./scripts/manage.sh` and follow the interactive prompts.*
