@@ -76,6 +76,16 @@ export class TradeEngine {
    * Execute a paper trade
    */
   private async executePaperTrade(rating: BetRating): Promise<TradeResult> {
+    // Check position and capital limits BEFORE calculating position size
+    const limitsCheck = this.checkPositionLimits();
+    if (!limitsCheck.allowed) {
+      return {
+        mode: 'paper',
+        executed: false,
+        reason: limitsCheck.reason!,
+      };
+    }
+
     // Calculate position size using Kelly Criterion
     const positionSize = this.calculateKellyPosition(rating);
     
@@ -94,6 +104,19 @@ export class TradeEngine {
         mode: 'paper',
         executed: false,
         reason: `Insufficient balance: ${formatUSD(this.paperBalance)} < ${formatUSD(positionSize)}`,
+      };
+    }
+
+    // Final check: Will this trade exceed locked capital limit?
+    const openTrades = getOpenPaperTrades();
+    const currentLocked = openTrades.reduce((sum, t) => sum + t.virtual_amount, 0);
+    const maxAllowedLocked = CONFIG.INITIAL_PAPER_BALANCE * (CONFIG.MAX_LOCKED_CAPITAL_PERCENT / 100);
+    
+    if (currentLocked + positionSize > maxAllowedLocked) {
+      return {
+        mode: 'paper',
+        executed: false,
+        reason: `Trade would exceed locked capital limit: ${formatUSD(currentLocked + positionSize)} > ${formatUSD(maxAllowedLocked)} (${CONFIG.MAX_LOCKED_CAPITAL_PERCENT}% of initial balance)`,
       };
     }
 
@@ -361,6 +384,98 @@ export class TradeEngine {
     if (wallet.is_new_suspicious) types.push('NEW');
     
     return types.length > 0 ? types.join('+') : 'TRACKED';
+  }
+
+  /**
+   * Check if we can open a new position based on limits
+   */
+  private checkPositionLimits(): { allowed: boolean; reason?: string } {
+    const openTrades = getOpenPaperTrades();
+    const openPositionCount = openTrades.length;
+    
+    // Check max open positions
+    if (openPositionCount >= CONFIG.MAX_OPEN_POSITIONS) {
+      logger.warn(`⚠️ Cannot open new position: Already at max open positions (${openPositionCount}/${CONFIG.MAX_OPEN_POSITIONS})`);
+      
+      // Emit warning to dashboard
+      try {
+        const wsManager = getWebSocketManager();
+        if (wsManager) {
+          wsManager.broadcast({
+            type: 'bot:warning',
+            data: {
+              message: `Max open positions reached (${openPositionCount}/${CONFIG.MAX_OPEN_POSITIONS})`,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
+      } catch (error) {
+        // Silently fail
+      }
+      
+      return {
+        allowed: false,
+        reason: `Max open positions reached: ${openPositionCount}/${CONFIG.MAX_OPEN_POSITIONS}`,
+      };
+    }
+    
+    return { allowed: true };
+  }
+
+  /**
+   * Get balance health status (for dashboard warnings)
+   */
+  getBalanceHealth(): { status: 'healthy' | 'warning' | 'critical'; availablePercent: number; openPositionCount: number; message?: string } {
+    const openTrades = getOpenPaperTrades();
+    const lockedCapital = openTrades.reduce((sum, t) => sum + t.virtual_amount, 0);
+    const availablePercent = (this.paperBalance / CONFIG.INITIAL_PAPER_BALANCE) * 100;
+    const openPositionCount = openTrades.length;
+    const positionUtilization = (openPositionCount / CONFIG.MAX_OPEN_POSITIONS) * 100;
+    
+    // Critical: Low balance or high position count
+    if (availablePercent < CONFIG.LOW_BALANCE_WARNING_PERCENT) {
+      return {
+        status: 'critical',
+        availablePercent,
+        openPositionCount,
+        message: `Low available balance: ${formatUSD(this.paperBalance)} (${availablePercent.toFixed(1)}% of initial)`,
+      };
+    }
+    
+    if (openPositionCount >= CONFIG.MAX_OPEN_POSITIONS * 0.9) {
+      return {
+        status: 'critical',
+        availablePercent,
+        openPositionCount,
+        message: `High position count: ${openPositionCount}/${CONFIG.MAX_OPEN_POSITIONS} (${positionUtilization.toFixed(0)}%)`,
+      };
+    }
+    
+    // Warning: Moderate concerns
+    if (availablePercent < CONFIG.LOW_BALANCE_WARNING_PERCENT * 2) {
+      return {
+        status: 'warning',
+        availablePercent,
+        openPositionCount,
+        message: `Available balance below ${(CONFIG.LOW_BALANCE_WARNING_PERCENT * 2).toFixed(0)}%`,
+      };
+    }
+    
+    if (openPositionCount >= CONFIG.MAX_OPEN_POSITIONS * 0.7) {
+      return {
+        status: 'warning',
+        availablePercent,
+        openPositionCount,
+        message: `Position count at ${positionUtilization.toFixed(0)}% capacity`,
+      };
+    }
+    
+    // Healthy
+    return {
+      status: 'healthy',
+      availablePercent,
+      openPositionCount,
+    };
   }
 
   /**

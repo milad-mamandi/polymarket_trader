@@ -37,6 +37,11 @@ export const CONFIG = {
   MIN_TRADE_AMOUNT_USD: Number(process.env.MIN_TRADE_AMOUNT_USD) || 5, // Skip trades below this
   MAX_KELLY_BET_PERCENT: Number(process.env.MAX_KELLY_BET_PERCENT) || 10, // Cap Kelly bets at this %
   
+  // Position & Capital Limits (prevents over-leveraging)
+  MAX_OPEN_POSITIONS: Number(process.env.MAX_OPEN_POSITIONS) || 30, // Max concurrent open trades
+  MAX_LOCKED_CAPITAL_PERCENT: Number(process.env.MAX_LOCKED_CAPITAL_PERCENT) || 80, // Max % of initial balance locked
+  LOW_BALANCE_WARNING_PERCENT: Number(process.env.LOW_BALANCE_WARNING_PERCENT) || 20, // Warn when available balance drops below this %
+  
   // Real Trading Mode
   TRADING_MODE: (process.env.TRADING_MODE as 'paper' | 'real') || 'paper',
   REAL_TRADING_ENABLED: process.env.TRADING_MODE === 'real',

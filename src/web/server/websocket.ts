@@ -8,7 +8,7 @@ import { URL } from 'url';
  * WebSocket message types
  */
 export interface WSMessage {
-  type: 'portfolio' | 'trade:new' | 'trade:resolved' | 'whale:detected' | 'bot:status' | 'order:status_changed' | 'order:filled' | 'order:partial_fill' | 'ping' | 'pong';
+  type: 'portfolio' | 'trade:new' | 'trade:resolved' | 'whale:detected' | 'bot:status' | 'bot:warning' | 'order:status_changed' | 'order:filled' | 'order:partial_fill' | 'ping' | 'pong';
   data?: any;
   timestamp?: number;
 }

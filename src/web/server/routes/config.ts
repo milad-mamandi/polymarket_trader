@@ -32,6 +32,11 @@ const EDITABLE_CONFIG = [
   { key: 'MIN_TRADE_AMOUNT_USD', type: 'number', category: 'Kelly Criterion', description: 'Minimum trade amount (USD) - skip smaller trades', min: 1, max: 100 },
   { key: 'MAX_KELLY_BET_PERCENT', type: 'number', category: 'Kelly Criterion', description: 'Cap Kelly bets at this % of bankroll', min: 1, max: 50 },
   
+  // Position & Capital Limits
+  { key: 'MAX_OPEN_POSITIONS', type: 'number', category: 'Position Limits', description: 'Maximum concurrent open trades', min: 5, max: 200 },
+  { key: 'MAX_LOCKED_CAPITAL_PERCENT', type: 'number', category: 'Position Limits', description: 'Max % of initial balance that can be locked in positions', min: 10, max: 100 },
+  { key: 'LOW_BALANCE_WARNING_PERCENT', type: 'number', category: 'Position Limits', description: 'Warn when available balance drops below this %', min: 5, max: 50 },
+  
   // Timing
   { key: 'TRADE_POLL_INTERVAL_MS', type: 'number', category: 'Timing', description: 'How often to scan for new trades (ms)', min: 5000, max: 300000 },
   { key: 'RESOLUTION_CHECK_INTERVAL_MS', type: 'number', category: 'Timing', description: 'How often to check for resolved markets (ms)', min: 60000, max: 3600000 },

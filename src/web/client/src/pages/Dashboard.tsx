@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { formatUSD, formatPercent, formatNumber, timeAgo, safeToFixed } from '../lib/utils';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useToast } from '../components/ToastProvider';
-import { Play, Square, RotateCw, TrendingUp, TrendingDown, ListOrdered } from 'lucide-react';
+import { Play, Square, RotateCw, TrendingUp, TrendingDown, ListOrdered, AlertTriangle } from 'lucide-react';
 import { useOverview, useTrades, useBotStatus, usePerformance, useBotControl, useOrderStats } from '../hooks/useQueries';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -98,6 +98,49 @@ export function Dashboard() {
   const pnl = overview?.portfolio?.pnl ?? 0;
   const winRate = overview?.trades?.winRate ?? 0;
 
+  // Calculate balance health
+  const availableBalance = overview?.portfolio?.balance ?? 0;
+  const startingBalance = overview?.portfolio?.startingBalance ?? 10000;
+  const openPositionsCount = overview?.trades?.open ?? 0;
+  const availablePercent = (availableBalance / startingBalance) * 100;
+  
+  // Determine health status (matching tradeEngine.ts logic)
+  const balanceHealth = (() => {
+    const maxOpenPositions = 30; // Should match CONFIG.MAX_OPEN_POSITIONS
+    const lowBalanceWarning = 20; // Should match CONFIG.LOW_BALANCE_WARNING_PERCENT
+    const positionUtilization = (openPositionsCount / maxOpenPositions) * 100;
+    
+    // Critical
+    if (availablePercent < lowBalanceWarning) {
+      return {
+        status: 'critical' as const,
+        message: `Low available balance: ${formatUSD(availableBalance)} (${availablePercent.toFixed(1)}% of starting balance)`,
+      };
+    }
+    if (positionUtilization >= 90) {
+      return {
+        status: 'critical' as const,
+        message: `Position count approaching limit: ${openPositionsCount}/${maxOpenPositions} (${positionUtilization.toFixed(0)}%)`,
+      };
+    }
+    
+    // Warning
+    if (availablePercent < lowBalanceWarning * 2) {
+      return {
+        status: 'warning' as const,
+        message: `Available balance below ${(lowBalanceWarning * 2).toFixed(0)}%`,
+      };
+    }
+    if (positionUtilization >= 70) {
+      return {
+        status: 'warning' as const,
+        message: `Position count at ${positionUtilization.toFixed(0)}% capacity`,
+      };
+    }
+    
+    return { status: 'healthy' as const };
+  })();
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -105,6 +148,31 @@ export function Dashboard() {
         <h1 className="text-2xl font-bold text-white">Overview</h1>
         <p className="text-slate-400 mt-1">Monitor your paper trading performance</p>
       </div>
+
+      {/* Balance Health Warning Banner */}
+      {balanceHealth.status !== 'healthy' && balanceHealth.message && (
+        <div className={`rounded-lg p-4 flex items-start gap-3 border ${
+          balanceHealth.status === 'critical' 
+            ? 'bg-red-900/20 border-red-700' 
+            : 'bg-yellow-900/20 border-yellow-700'
+        }`}>
+          <AlertTriangle className={`w-5 h-5 mt-0.5 flex-shrink-0 ${
+            balanceHealth.status === 'critical' ? 'text-red-400' : 'text-yellow-400'
+          }`} />
+          <div className="flex-1">
+            <div className={`font-semibold text-sm mb-1 ${
+              balanceHealth.status === 'critical' ? 'text-red-300' : 'text-yellow-300'
+            }`}>
+              {balanceHealth.status === 'critical' ? 'Critical Warning' : 'Warning'}
+            </div>
+            <div className={`text-sm ${
+              balanceHealth.status === 'critical' ? 'text-red-200' : 'text-yellow-200'
+            }`}>
+              {balanceHealth.message}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
