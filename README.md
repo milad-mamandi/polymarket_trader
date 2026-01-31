@@ -29,16 +29,13 @@ A sophisticated bot that scouts for whale activity and suspicious new wallets on
 - (Optional) Telegram bot token for notifications
 - (Optional) Polymarket API credentials for real trading
 
-**Important:** Node.js v22 LTS or higher is required. If you're on an older version, see the [Node.js Upgrade Guide](deploy/README.md#nodejs-upgrade-guide).
+**Important:** Node.js v22 LTS or higher is required.
 
 **Quick Install Node.js v22:**
 ```bash
 # Ubuntu/Debian
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
-
-# Or use the automated upgrade script
-sudo bash deploy/upgrade-nodejs.sh
 ```
 
 ### Setup
@@ -247,40 +244,83 @@ SQLite database stored in `data/whale_bot.db` with tables:
 ✅ **Error Handling** - Graceful degradation on API failures  
 ✅ **Rate Limiting** - Respects API limits with caching  
 
-## Server Deployment
+## Deployment & Management
 
-Deploy as a systemd service on Linux servers:
+### Unified Manager Script
 
-**Prerequisites:**
-- Ubuntu/Debian server
-- Node.js v22 LTS or higher
-- Root or sudo access
-
-**Quick Deploy:**
+The `manage.sh` script handles both **development (PM2)** and **production (systemd)** modes:
 
 ```bash
-# 1. Upgrade Node.js to v22 (if needed)
-sudo bash deploy/upgrade-nodejs.sh
-
-# 2. Build the project
-npm install
-npm run build
-
-# 3. Run automated deployment
-sudo bash deploy/deploy.sh
-
-# 4. Configure
-sudo nano /opt/whale-scout/.env
-
-# 5. Start service
-sudo systemctl start whale-scout
-sudo systemctl enable whale-scout
-
-# 6. View logs
-sudo journalctl -u whale-scout -f
+# Run interactive manager
+./manage.sh
 ```
 
-See [deploy/README.md](deploy/README.md) for detailed deployment instructions, troubleshooting, and the Node.js upgrade guide.
+**Quick Deploy (Production):**
+
+```bash
+# 1. Setup environment (Node.js v22, swap, build tools)
+./manage.sh → Select option 6
+
+# 2. Deploy (pull, build, install systemd service)
+sudo ./manage.sh → Select option 1
+
+# 3. Configure
+sudo nano /opt/whale-scout/.env
+
+# 4. Start service
+sudo ./manage.sh → Select option 4
+
+# 5. View logs
+sudo ./manage.sh → Select option 5
+```
+
+**Development Mode (PM2):**
+
+```bash
+# Setup and run in development mode
+./manage.sh → 6 (Setup)
+./manage.sh → 1 (Deploy - will use PM2 mode as non-root)
+./manage.sh → 4 (Start)
+```
+
+### CLI Quick Commands
+
+```bash
+# Start bot
+./manage.sh start
+
+# Stop bot
+./manage.sh stop
+
+# View status
+./manage.sh status
+
+# View logs
+./manage.sh logs
+```
+
+### Deployment Modes
+
+**systemd Mode (Production)** - Default when running as root:
+- ✅ System service with auto-start
+- ✅ Dedicated `whale-scout` user
+- ✅ Resource limits (512MB memory)
+- ✅ Systemd journal logging
+- ✅ Log rotation
+- ✅ Installed to `/opt/whale-scout/`
+
+**PM2 Mode (Development)** - Default when non-root:
+- ✅ Simple process management
+- ✅ Runs as current user
+- ✅ Good for development/testing
+- ✅ Logs via PM2 or file
+
+**Switching Modes:**
+The manager auto-detects your current mode. Use option 10 to switch:
+- PM2 → systemd: `./manage.sh` → 10 (requires sudo)
+- systemd → PM2: `./manage.sh` → 10
+
+Database automatically transfers between modes.
 
 ## Disclaimer
 

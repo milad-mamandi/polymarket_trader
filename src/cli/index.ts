@@ -15,9 +15,11 @@ import { configCommand } from './commands/config.js';
 import { dashboardCommand } from './commands/dashboard.js';
 import { resetCommand } from './commands/reset.js';
 import { passwordCommand } from './commands/password.js';
+import { stopCommand } from './commands/stop.js';
 
 const COMMANDS = {
   start: startCommand,
+  stop: stopCommand,
   stats: statsCommand,
   trades: tradesCommand,
   config: configCommand,
@@ -34,6 +36,9 @@ Usage: whale-scout <command> [options]
 
 Commands:
   start              Start the bot with monitoring and dashboard
+  stop [options]     Stop all running Whale Scout instances
+    --force, -f      Force kill (immediate termination)
+    --quiet, -q      Minimal output
   stats              Show bot statistics and performance
   trades [options]   View or export trades
     --limit <n>      Show last n trades (default: 20)
@@ -52,6 +57,8 @@ Options:
 
 Examples:
   whale-scout start                  # Start bot
+  whale-scout stop                   # Stop all instances gracefully
+  whale-scout stop --force           # Force kill all instances
   whale-scout stats                  # View statistics
   whale-scout trades --limit 50      # Show last 50 trades
   whale-scout trades export          # Export trades to CSV
