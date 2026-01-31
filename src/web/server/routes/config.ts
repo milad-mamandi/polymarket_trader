@@ -126,6 +126,9 @@ router.put('/', async (req: Request, res: Response) => {
       return;
     }
     
+    // Debug logging
+    logger.debug(`Config update request: ${JSON.stringify(updates)}`);
+    
     // Validate all updates
     const validatedUpdates: Record<string, string> = {};
     const errors: Record<string, string> = {};
@@ -155,11 +158,14 @@ router.put('/', async (req: Request, res: Response) => {
         }
         validatedUpdates[key] = String(numValue);
       } else if (configItem.type === 'boolean') {
-        if (value !== true && value !== false && value !== 'true' && value !== 'false') {
-          errors[key] = 'Must be true or false';
+        // Accept both actual booleans and string representations
+        const boolValue = value === true || value === 'true' || value === '1' || value === 1;
+        const isValidBool = (value === true || value === false || value === 'true' || value === 'false');
+        if (!isValidBool) {
+          errors[key] = `Must be true or false (received: ${typeof value} = ${value})`;
           continue;
         }
-        validatedUpdates[key] = String(value);
+        validatedUpdates[key] = String(boolValue);
       } else if (configItem.type === 'select') {
         const options = (configItem as any).options || [];
         if (!options.includes(value)) {
@@ -185,16 +191,21 @@ router.put('/', async (req: Request, res: Response) => {
     }
     
     if (Object.keys(errors).length > 0) {
+      logger.warn(`Config validation failed: ${JSON.stringify(errors)}`);
       res.status(400).json({ error: 'Validation failed', errors });
       return;
     }
     
     // Read current .env file
     const envPath = path.resolve(process.cwd(), '.env');
+    logger.debug(`Writing to .env file: ${envPath}`);
     let envContent = '';
     
     if (fs.existsSync(envPath)) {
       envContent = fs.readFileSync(envPath, 'utf-8');
+      logger.debug(`.env file exists, size: ${envContent.length} bytes`);
+    } else {
+      logger.debug('.env file does not exist, will create new one');
     }
     
     // Update or add each key
@@ -204,14 +215,17 @@ router.put('/', async (req: Request, res: Response) => {
       if (regex.test(envContent)) {
         // Update existing
         envContent = envContent.replace(regex, `${key}=${value}`);
+        logger.debug(`Updated existing key: ${key}`);
       } else {
         // Add new
         envContent += `\n${key}=${value}`;
+        logger.debug(`Added new key: ${key}`);
       }
     }
     
     // Write back to .env
     fs.writeFileSync(envPath, envContent, 'utf-8');
+    logger.debug(`.env file written successfully`);
     
     logger.info(`Configuration updated: ${Object.keys(validatedUpdates).join(', ')}`);
     

@@ -192,6 +192,12 @@ cmd_deploy() {
   echo -e "${YELLOW}📦 Installing dependencies...${NC}"
   npm ci 2>/dev/null || npm install
   
+  # Install web client dependencies
+  if [ -d "src/web/client" ]; then
+    echo -e "${YELLOW}📦 Installing web client dependencies...${NC}"
+    (cd src/web/client && npm ci 2>/dev/null || npm install)
+  fi
+  
   # Build
   echo -e "${YELLOW}🔨 Building project...${NC}"
   export NODE_OPTIONS="--max-old-space-size=1536"
@@ -560,6 +566,12 @@ cmd_setup() {
   echo -e "${YELLOW}📦 Installing project dependencies...${NC}"
   npm install
   
+  # Install web client dependencies
+  if [ -d "src/web/client" ]; then
+    echo -e "${YELLOW}📦 Installing web client dependencies...${NC}"
+    (cd src/web/client && npm install)
+  fi
+  
   echo -e "${GREEN}✅ Setup complete!${NC}"
   echo -e "${CYAN}You can now deploy with option 1${NC}"
   read -p "Press Enter to continue..."
@@ -590,6 +602,13 @@ install_nodejs() {
     echo -e "${YELLOW}🔧 Rebuilding application...${NC}"
     rm -rf node_modules package-lock.json
     npm install
+    
+    # Install web client dependencies
+    if [ -d "src/web/client" ]; then
+      echo -e "${YELLOW}📦 Installing web client dependencies...${NC}"
+      (cd src/web/client && rm -rf node_modules package-lock.json && npm install)
+    fi
+    
     npm run build
     
     if [ "$was_running" = true ]; then
@@ -921,10 +940,19 @@ cmd_clean_rebuild() {
   # Clean
   echo -e "${YELLOW}Cleaning build artifacts...${NC}"
   rm -rf node_modules dist package-lock.json
+  if [ -d "src/web/client" ]; then
+    rm -rf src/web/client/node_modules src/web/client/package-lock.json
+  fi
   
   # Reinstall
   echo -e "${YELLOW}Reinstalling dependencies...${NC}"
   npm install
+  
+  # Install web client dependencies
+  if [ -d "src/web/client" ]; then
+    echo -e "${YELLOW}📦 Installing web client dependencies...${NC}"
+    (cd src/web/client && npm install)
+  fi
   
   # Build
   echo -e "${YELLOW}Rebuilding...${NC}"
