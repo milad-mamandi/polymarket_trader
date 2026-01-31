@@ -4,6 +4,10 @@
   "description": "A dashboard to track whales and suspicious wallets on Polymarket with paper trading",
   "main": "dist/main.js",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "tsx src/main.ts",
     "build": "npm run clean && tsc && npm run build:client",

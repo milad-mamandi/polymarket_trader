@@ -42,13 +42,15 @@ If you prefer manual installation:
 ### 1. Prerequisites
 
 ```bash
-# Install Node.js 18+
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+# Install Node.js 22 LTS
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# Verify version
-node -v  # Should be v18 or higher
+# Verify version (must be v22.0.0 or higher)
+node -v  # Should be v22 or higher
 ```
+
+**Important:** Node.js v22+ is required for ES2022+ syntax support. If you're upgrading from an older version, see the [Node.js Upgrade Guide](#nodejs-upgrade-guide) below.
 
 ### 2. Create Service User
 
@@ -402,7 +404,7 @@ sudo systemctl status whale-scout
 
 # Adjust memory limit in service file
 sudo nano /etc/systemd/system/whale-scout.service
-# Change: MemoryLimit=512M
+# Change: MemoryMax=512M
 
 sudo systemctl daemon-reload
 sudo systemctl restart whale-scout
@@ -419,6 +421,151 @@ sudo -u whale-scout fuser /opt/whale-scout/data/whale_bot.db
 
 # Restart service
 sudo systemctl start whale-scout
+```
+
+### SyntaxError: Unexpected token 'with'
+
+This error occurs when running the bot on Node.js versions older than v20.10.0.
+
+**Cause:** The bot uses modern ES2022+ syntax (Import Attributes) that requires Node.js v22+.
+
+**Solution:**
+
+```bash
+# Check your Node.js version
+node -v
+
+# If it shows v18.x or v20.x, upgrade to v22:
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Verify upgrade
+node -v  # Should show v22.x.x
+
+# Rebuild the application
+cd ~/polymarket_trader
+rm -rf node_modules package-lock.json dist/
+npm install
+npm run build
+
+# Redeploy
+sudo systemctl stop whale-scout
+sudo bash deploy/deploy.sh
+sudo systemctl start whale-scout
+```
+
+Or use the automated upgrade script:
+
+```bash
+cd ~/polymarket_trader
+sudo bash deploy/upgrade-nodejs.sh
+```
+
+### Node.js Upgrade Guide
+
+If you're running Node.js v18 or older and need to upgrade:
+
+**Option 1: Automated Script (Recommended)**
+
+```bash
+# Run the upgrade script
+sudo bash deploy/upgrade-nodejs.sh
+
+# This will:
+# - Stop the whale-scout service
+# - Remove old Node.js version
+# - Install Node.js v22 LTS
+# - Rebuild native modules
+# - Restart the service
+```
+
+**Option 2: Manual Upgrade**
+
+```bash
+# Stop the service
+sudo systemctl stop whale-scout
+
+# Remove old Node.js
+sudo apt-get remove nodejs -y
+sudo apt-get autoremove -y
+
+# Add NodeSource repository for Node.js v22
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+
+# Install Node.js v22
+sudo apt-get install -y nodejs
+
+# Verify installation
+node -v  # Should show v22.x.x
+npm -v   # Should show v10.x.x
+
+# Navigate to project and rebuild
+cd ~/polymarket_trader
+rm -rf node_modules package-lock.json dist/
+npm install
+npm run build
+
+# Redeploy
+sudo bash deploy/deploy.sh
+
+# Start service
+sudo systemctl start whale-scout
+sudo systemctl status whale-scout
+```
+
+## Common Issues and Solutions
+
+### Issue: Service fails with "REAL_TRADING_PRIVATE_KEY is required"
+
+**Cause:** The CLOB client is trying to initialize even in paper trading mode.
+
+**Solution:** This should not prevent the bot from starting. Check your `.env` file:
+
+```bash
+sudo nano /opt/whale-scout/.env
+
+# Make sure TRADING_MODE is set correctly:
+TRADING_MODE=paper
+
+# If you're using paper trading, you can leave these empty:
+REAL_TRADING_PRIVATE_KEY=
+REAL_TRADING_FUNDER_ADDRESS=
+```
+
+### Issue: "Module not found" errors
+
+**Cause:** Dependencies not installed or build incomplete.
+
+**Solution:**
+
+```bash
+cd ~/polymarket_trader
+npm install
+npm run build
+sudo bash deploy/deploy.sh
+```
+
+### Issue: Dashboard not loading
+
+**Cause:** Frontend not built or port blocked.
+
+**Solution:**
+
+```bash
+# Build frontend
+cd ~/polymarket_trader/src/web/client
+npm install
+npm run build
+cd ../../..
+
+# Redeploy
+sudo bash deploy/deploy.sh
+
+# Check if port 3000 is accessible
+sudo ufw allow 3000
+
+# Test locally
+curl http://localhost:3000
 ```
 
 ## Uninstall

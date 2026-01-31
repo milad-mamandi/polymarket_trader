@@ -17,7 +17,7 @@ SyslogIdentifier=whale-scout
 
 # Resource limits
 LimitNOFILE=65536
-MemoryLimit=512M
+MemoryMax=512M
 
 # Security hardening
 NoNewPrivileges=true

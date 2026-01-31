@@ -25,9 +25,21 @@ A sophisticated bot that scouts for whale activity and suspicious new wallets on
 
 ### Prerequisites
 
-- Node.js 18+ and npm
+- **Node.js 22+ and npm** (required for ES2022+ syntax support)
 - (Optional) Telegram bot token for notifications
 - (Optional) Polymarket API credentials for real trading
+
+**Important:** Node.js v22 LTS or higher is required. If you're on an older version, see the [Node.js Upgrade Guide](deploy/README.md#nodejs-upgrade-guide).
+
+**Quick Install Node.js v22:**
+```bash
+# Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Or use the automated upgrade script
+sudo bash deploy/upgrade-nodejs.sh
+```
 
 ### Setup
 
@@ -239,28 +251,36 @@ SQLite database stored in `data/whale_bot.db` with tables:
 
 Deploy as a systemd service on Linux servers:
 
+**Prerequisites:**
+- Ubuntu/Debian server
+- Node.js v22 LTS or higher
+- Root or sudo access
+
+**Quick Deploy:**
+
 ```bash
-# Build the project
+# 1. Upgrade Node.js to v22 (if needed)
+sudo bash deploy/upgrade-nodejs.sh
+
+# 2. Build the project
+npm install
 npm run build
 
-# Build frontend
-cd src/web/client && npm install && npm run build && cd ../../..
+# 3. Run automated deployment
+sudo bash deploy/deploy.sh
 
-# Run automated installer
-sudo ./deploy/install.sh
-
-# Configure
+# 4. Configure
 sudo nano /opt/whale-scout/.env
 
-# Start service
+# 5. Start service
 sudo systemctl start whale-scout
 sudo systemctl enable whale-scout
 
-# View logs
+# 6. View logs
 sudo journalctl -u whale-scout -f
 ```
 
-See [deploy/README.md](deploy/README.md) for detailed deployment instructions.
+See [deploy/README.md](deploy/README.md) for detailed deployment instructions, troubleshooting, and the Node.js upgrade guide.
 
 ## Disclaimer
 

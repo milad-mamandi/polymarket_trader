@@ -42,15 +42,27 @@ echo -e "${GREEN}✓ Running as root${NC}"
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
     echo -e "${RED}❌ Error: Node.js is not installed${NC}"
-    echo "Please install Node.js v18 or higher first:"
-    echo "  curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -"
+    echo "Please install Node.js v22 LTS or higher first:"
+    echo "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
     echo "  sudo apt-get install -y nodejs"
+    echo ""
+    echo "Or use the automated upgrade script:"
+    echo "  sudo bash deploy/upgrade-nodejs.sh"
     exit 1
 fi
 
 NODE_VERSION=$(node -v | cut -d'v' -f2 | cut -d'.' -f1)
-if [ "$NODE_VERSION" -lt 18 ]; then
-    echo -e "${RED}❌ Error: Node.js version 18+ required (found v$NODE_VERSION)${NC}"
+if [ "$NODE_VERSION" -lt 22 ]; then
+    echo -e "${RED}❌ Error: Node.js version 22+ required (found v$NODE_VERSION)${NC}"
+    echo ""
+    echo -e "${YELLOW}This bot requires Node.js v22 LTS for ES2022+ syntax support.${NC}"
+    echo ""
+    echo "To upgrade Node.js on Ubuntu/Debian:"
+    echo "  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -"
+    echo "  sudo apt-get install -y nodejs"
+    echo ""
+    echo "Or use the automated upgrade script:"
+    echo "  sudo bash deploy/upgrade-nodejs.sh"
     exit 1
 fi
 echo -e "${GREEN}✓ Node.js $(node -v) detected${NC}"
@@ -115,6 +127,13 @@ fi
 # Check for main entry point
 if [ ! -f "dist/main.js" ]; then
     echo -e "${YELLOW}⚠  Warning: dist/main.js not found${NC}"
+fi
+
+# Check for CLI entry point
+if [ ! -f "dist/cli/index.js" ]; then
+    echo -e "${RED}❌ Error: dist/cli/index.js not found${NC}"
+    echo -e "${YELLOW}   CLI entry point is missing. Build may have failed.${NC}"
+    exit 1
 fi
 
 echo -e "${GREEN}✓ Backend built successfully${NC}"
