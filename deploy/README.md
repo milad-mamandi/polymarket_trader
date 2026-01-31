@@ -5,10 +5,41 @@ This directory contains files for deploying Whale Scout Bot as a production serv
 ## Files
 
 - **`whale-scout.service`** - systemd service configuration
-- **`install.sh`** - Automated installation script
+- **`install.sh`** - Automated installation script (requires pre-built application)
+- **`deploy.sh`** - Automated build and deployment script (recommended)
+- **`upgrade-nodejs.sh`** - Upgrade Node.js from v18 to v22
 - **`logrotate.conf`** - Log rotation configuration
+- **`cloudflared.service`** - Cloudflare Tunnel systemd service (optional)
 
 ## Quick Install (Ubuntu/Debian)
+
+### Option 1: Automated Deploy (Recommended)
+
+Use the `deploy.sh` script to automatically build and deploy:
+
+```bash
+# 1. Clone or pull the repository on your server
+cd ~/polymarket_trader
+git pull origin main  # Or git clone if first time
+
+# 2. Run the deploy script (builds everything and deploys)
+sudo bash deploy/deploy.sh
+
+# 3. Edit configuration
+sudo nano /opt/whale-scout/.env
+
+# 4. Start the service
+sudo systemctl start whale-scout
+sudo systemctl enable whale-scout  # Auto-start on boot
+
+# 5. Check status
+sudo systemctl status whale-scout
+sudo journalctl -u whale-scout -f  # Follow logs
+```
+
+### Option 2: Manual Build + Install
+
+If you want to build locally and then install:
 
 ```bash
 # 1. Build the backend
@@ -21,7 +52,7 @@ npm run build
 cd ../../..
 
 # 3. Run installer (as root)
-sudo ./deploy/install.sh
+sudo bash deploy/install.sh
 
 # 4. Edit configuration
 sudo nano /opt/whale-scout/.env
@@ -298,6 +329,163 @@ sudo apt install certbot python3-certbot-nginx
 sudo certbot --nginx -d whale-scout.yourdomain.com
 ```
 
+## Cloudflare Tunnel Setup (Recommended for HTTPS)
+
+Cloudflare Tunnel provides secure HTTPS access to your dashboard without opening ports or managing SSL certificates. This is the recommended approach for production deployments.
+
+### Prerequisites
+
+- A domain managed by Cloudflare
+- Cloudflare account (free tier works)
+- Dashboard accessible locally on the server (`http://localhost:3000`)
+
+### Installation Steps
+
+#### 1. Install cloudflared
+
+```bash
+# Download and install cloudflared
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared-linux-amd64.deb
+
+# Verify installation
+cloudflared --version
+```
+
+#### 2. Authenticate with Cloudflare
+
+```bash
+# This will open a browser to authenticate
+cloudflared tunnel login
+```
+
+Follow the browser prompts to authenticate and select your domain.
+
+#### 3. Create a Tunnel
+
+```bash
+# Create a tunnel named "whale-scout"
+cloudflared tunnel create whale-scout
+
+# Save the tunnel ID shown in the output
+# Example: Created tunnel whale-scout with id 12345678-abcd-1234-5678-1234567890ab
+```
+
+#### 4. Configure the Tunnel
+
+Create the tunnel configuration file:
+
+```bash
+sudo mkdir -p /etc/cloudflared
+sudo nano /etc/cloudflared/config.yml
+```
+
+Add the following configuration (replace `TUNNEL_ID` with your tunnel ID):
+
+```yaml
+tunnel: TUNNEL_ID
+credentials-file: /root/.cloudflared/TUNNEL_ID.json
+
+ingress:
+  - hostname: whale-scout.yourdomain.com
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+**Important:** Replace:
+- `TUNNEL_ID` with the tunnel ID from step 3
+- `whale-scout.yourdomain.com` with your actual domain
+
+#### 5. Create DNS Record
+
+```bash
+# Create a CNAME record pointing to your tunnel
+cloudflared tunnel route dns whale-scout whale-scout.yourdomain.com
+```
+
+Or manually add a CNAME record in Cloudflare dashboard:
+- Type: `CNAME`
+- Name: `whale-scout` (or your subdomain)
+- Target: `TUNNEL_ID.cfargotunnel.com`
+- Proxied: Yes (orange cloud)
+
+#### 6. Install as Systemd Service
+
+```bash
+# Copy the service file
+sudo cp deploy/cloudflared.service /etc/systemd/system/
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable and start the tunnel
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+
+# Check status
+sudo systemctl status cloudflared
+```
+
+#### 7. Test Access
+
+Open your browser to `https://whale-scout.yourdomain.com`
+
+You should see the login page served over HTTPS!
+
+### Troubleshooting Cloudflare Tunnel
+
+**Tunnel won't start:**
+
+```bash
+# Check tunnel status
+sudo systemctl status cloudflared
+
+# View logs
+sudo journalctl -u cloudflared -f
+
+# Test tunnel manually
+sudo cloudflared tunnel run whale-scout
+```
+
+**DNS not resolving:**
+
+```bash
+# Verify DNS record
+dig whale-scout.yourdomain.com
+
+# Check Cloudflare DNS settings
+# Ensure CNAME record exists and is proxied (orange cloud)
+```
+
+**Connection refused:**
+
+```bash
+# Verify dashboard is running locally
+curl http://localhost:3000
+
+# Check firewall (should NOT block localhost)
+sudo systemctl status whale-scout
+```
+
+**Certificate errors:**
+
+Cloudflare Tunnel handles SSL automatically. If you see certificate errors:
+- Ensure "Proxied" is enabled (orange cloud) in Cloudflare DNS
+- Check SSL/TLS encryption mode in Cloudflare (should be "Flexible" or "Full")
+
+### Why Cloudflare Tunnel?
+
+**Advantages over traditional reverse proxy:**
+- ✅ No port forwarding required
+- ✅ Automatic SSL/TLS certificates
+- ✅ DDoS protection via Cloudflare
+- ✅ No need for public IP address
+- ✅ Works behind NAT/firewalls
+- ✅ Built-in rate limiting and caching
+- ✅ Free for personal use
+
+**Note:** Cloudflare Tunnel only works on specific ports. Port 3000 is NOT supported for direct proxying. The tunnel must connect to `localhost:3000` on the server, and Cloudflare exposes it via standard ports (80/443).
+
 ## Configuration
 
 Edit the `.env` file:
@@ -410,7 +598,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart whale-scout
 ```
 
-### Database locked errors
+### Dashboard locked errors
 
 ```bash
 # Stop service
@@ -421,6 +609,108 @@ sudo -u whale-scout fuser /opt/whale-scout/data/whale_bot.db
 
 # Restart service
 sudo systemctl start whale-scout
+```
+
+### Dashboard 401 Unauthorized Error
+
+**Symptoms:**
+- Login succeeds (shows "Login successful")
+- Dashboard immediately returns 401 Unauthorized
+- All API requests fail with 401
+- Browser console shows failed `/api/auth/check` requests
+
+**Cause:** Session cookies not being stored/sent by browser, usually due to:
+1. Secure cookies required by HTTPS-only flag when accessing via HTTP
+2. CORS restrictions blocking cross-origin requests
+3. Proxy/Cloudflare headers not being trusted
+
+**Solution 1: Access via HTTPS (Recommended)**
+
+Use Cloudflare Tunnel or nginx with SSL:
+
+```bash
+# See "Cloudflare Tunnel Setup" section above for full guide
+cloudflared tunnel create whale-scout
+# ... follow setup steps
+```
+
+**Solution 2: Verify Cookie Settings**
+
+The bot now automatically detects HTTP vs HTTPS and sets cookies accordingly. Verify your setup:
+
+```bash
+# Check if bot is running in production mode
+sudo systemctl status whale-scout | grep NODE_ENV
+
+# If using a proxy (nginx, Cloudflare), ensure headers are set correctly
+# The bot trusts: X-Forwarded-Proto, CF-Visitor headers
+```
+
+**Solution 3: Check Browser Console**
+
+Open browser DevTools (F12) → Network tab → Try logging in:
+
+```
+1. Login request succeeds (200 OK)
+2. Set-Cookie header present in response?
+   - If NO: Check server logs for errors
+   - If YES: Check cookie flags (Secure, SameSite)
+3. Subsequent requests include Cookie header?
+   - If NO: Browser blocking cookies (check flags)
+   - If YES: Server rejecting session (check session store)
+```
+
+**Solution 4: Test Locally First**
+
+Test on the server itself to isolate the issue:
+
+```bash
+# Install curl if needed
+sudo apt install curl -y
+
+# Test login
+curl -v -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"password":"your-password"}' \
+  -c cookies.txt
+
+# Test authenticated endpoint
+curl -v http://localhost:3000/api/auth/check -b cookies.txt
+
+# Should return: {"authenticated":true,"loginTime":...}
+```
+
+**Solution 5: Clear Browser Data**
+
+Sometimes old cookies cause conflicts:
+
+```
+1. Open DevTools (F12) → Application → Cookies
+2. Delete all cookies for your domain
+3. Try logging in again
+```
+
+**Solution 6: Check Firewall/Network**
+
+```bash
+# Ensure port 3000 is accessible
+sudo ufw status
+sudo ufw allow 3000
+
+# Test from local machine
+curl http://SERVER_IP:3000/health
+```
+
+**Still Having Issues?**
+
+Check the logs for detailed error messages:
+
+```bash
+# Application logs
+sudo journalctl -u whale-scout -f | grep -i "auth\|cookie\|session"
+
+# Check for CORS errors
+sudo journalctl -u whale-scout -f | grep -i "cors\|origin"
 ```
 
 ### SyntaxError: Unexpected token 'with'

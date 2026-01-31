@@ -50,7 +50,7 @@ export async function verifyPassword(password: string): Promise<boolean> {
 /**
  * Create session
  */
-export function createSession(res: Response): string {
+export function createSession(req: Request, res: Response): string {
   const sessionId = generateSessionId();
   const session = {
     authenticated: true,
@@ -59,12 +59,17 @@ export function createSession(res: Response): string {
   
   sessions.set(sessionId, session);
   
+  // Detect if request came via HTTPS (direct or via Cloudflare/proxy)
+  const isSecure = req.secure || 
+    req.get('x-forwarded-proto') === 'https' ||
+    req.get('cf-visitor')?.includes('"scheme":"https"');
+  
   // Set cookie
   res.cookie('sessionId', sessionId, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isSecure,  // Only secure if actually using HTTPS
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    sameSite: 'strict',
+    sameSite: isSecure ? 'strict' : 'lax',  // Lax for HTTP compatibility
   });
   
   return sessionId;

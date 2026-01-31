@@ -25,7 +25,7 @@ router.post('/login', async (req: Request, res: Response) => {
       return;
     }
     
-    const sessionId = createSession(res);
+    const sessionId = createSession(req, res);
     logger.info('Successful login from ' + req.ip);
     
     res.json({ success: true, message: 'Login successful' });

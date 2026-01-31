@@ -40,16 +40,17 @@ export class DashboardServer {
    * Setup Express middleware
    */
   private setupMiddleware() {
+    // Trust proxy (for Cloudflare, nginx, etc.)
+    this.app.set('trust proxy', 1);
+    
     // Security
     this.app.use(helmet({
       contentSecurityPolicy: false, // Allow inline scripts for React
     }));
     
-    // CORS
+    // CORS - allow all origins since auth is handled by cookies
     this.app.use(cors({
-      origin: process.env.NODE_ENV === 'production' 
-        ? [`http://localhost:${this.port}`]
-        : true,
+      origin: true,  // Reflect request origin
       credentials: true,
     }));
     
