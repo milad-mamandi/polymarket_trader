@@ -46,6 +46,14 @@ git pull origin main
 echo -e "\n${YELLOW}📦 Installing dependencies...${NC}"
 npm install
 
+# Rebuild native modules (fixes better-sqlite3 bindings issues on Node.js version changes)
+echo -e "\n${YELLOW}🔧 Rebuilding native modules...${NC}"
+npm rebuild || {
+  echo -e "${YELLOW}⚠️  Rebuild failed, attempting clean install...${NC}"
+  rm -rf node_modules package-lock.json
+  npm install
+}
+
 # Build TypeScript and client
 echo -e "\n${YELLOW}🔨 Building project...${NC}"
 npm run build

@@ -44,6 +44,17 @@ git pull origin main
 Write-Host "`n📦 Installing dependencies..." -ForegroundColor Yellow
 npm install
 
+# Rebuild native modules (fixes better-sqlite3 bindings issues on Node.js version changes)
+Write-Host "`n🔧 Rebuilding native modules..." -ForegroundColor Yellow
+try {
+    npm rebuild
+} catch {
+    Write-Host "⚠️  Rebuild failed, attempting clean install..." -ForegroundColor Yellow
+    Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+    Remove-Item -Force package-lock.json -ErrorAction SilentlyContinue
+    npm install
+}
+
 # Build TypeScript and client
 Write-Host "`n🔨 Building project..." -ForegroundColor Yellow
 npm run build

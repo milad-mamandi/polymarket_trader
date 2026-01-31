@@ -197,6 +197,31 @@ npm install -g pm2
 - macOS: `brew install sqlite3`
 - Windows: Download from https://www.sqlite.org/download.html
 
+**Native module error (better-sqlite3):**
+This error occurs when `better-sqlite3` native bindings aren't built for your Node.js version:
+
+```bash
+# Fix 1: Rebuild native modules
+npm rebuild
+
+# Fix 2: Clean reinstall (if rebuild fails)
+rm -rf node_modules package-lock.json
+npm install
+
+# Fix 3: Install build tools (if npm install fails)
+# Ubuntu/Debian:
+sudo apt update
+sudo apt install build-essential python3
+
+# macOS:
+xcode-select --install
+
+# Then reinstall:
+npm install
+```
+
+The deploy scripts now automatically handle this with `npm rebuild` after `npm install`.
+
 **SSH connection fails:**
 - Check `SERVER_HOST`, `SERVER_USER`, `SERVER_PATH` in `.env`
 - Ensure SSH key authentication is set up
