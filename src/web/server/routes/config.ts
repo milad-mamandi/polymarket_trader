@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '../middleware/auth.js';
-import { CONFIG } from '../../../config/settings.js';
+import { CONFIG, refreshConfig } from '../../../config/settings.js';
 import { logger } from '../../../utils/logger.js';
 import { getKillSwitchStatus, activateKillSwitch, deactivateKillSwitch } from '../../../core/killSwitch.js';
 import { getSafetyStatus } from '../../../services/realTradeExecutor.js';
@@ -201,6 +201,9 @@ router.put('/', async (req: Request, res: Response) => {
     try {
       setRuntimeConfigValues(validatedUpdates);
       logger.info(`Configuration saved to database: ${Object.keys(validatedUpdates).join(', ')}`);
+      
+      // Reload config to apply changes immediately
+      refreshConfig();
     } catch (dbError) {
       const errorMessage = dbError instanceof Error ? dbError.message : String(dbError);
       logger.error(`Failed to save config to database: ${errorMessage}`);

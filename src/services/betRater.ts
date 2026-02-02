@@ -32,7 +32,8 @@ export class BetRater {
     logger.info(`Rating bet from ${trade.proxyWallet} on "${trade.title}"`);
 
     // CRITICAL: Check market status FIRST before any calculations
-    const marketStatus = await this.validateMarketStatus(trade.conditionId);
+    // Use slug for more reliable API lookups
+    const marketStatus = await this.validateMarketStatus(trade.conditionId, trade.slug);
     if (!marketStatus.isValid) {
       logger.warn(`Trade blocked - ${marketStatus.reason}: ${trade.title}`);
       return this.createBlockedRating(trade, walletSuspicionScore, marketStatus.reason!);
@@ -85,10 +86,17 @@ export class BetRater {
 
   /**
    * Validate if a market is tradable (not ended, closed, or resolved)
+   * Uses slug for more reliable API lookups when available
    */
-  private async validateMarketStatus(conditionId: string): Promise<{ isValid: boolean; reason?: string }> {
+  private async validateMarketStatus(conditionId: string, slug?: string): Promise<{ isValid: boolean; reason?: string }> {
     try {
-      const market = await polymarketApi.getMarketByConditionId(conditionId, 'debug');
+      // Prefer slug-based lookup (more reliable) over conditionId-based lookup
+      let market;
+      if (slug) {
+        market = await polymarketApi.getMarketBySlug(slug, 'debug');
+      } else {
+        market = await polymarketApi.getMarketByConditionId(conditionId, 'debug');
+      }
       
       if (!market) {
         return { isValid: false, reason: 'Market not found or archived' };

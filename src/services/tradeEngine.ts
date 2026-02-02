@@ -295,6 +295,9 @@ export class TradeEngine {
     const maxBet = this.paperBalance * (CONFIG.MAX_KELLY_BET_PERCENT / 100);
     positionSize = Math.min(positionSize, maxBet);
     
+    // Apply minimum position floor ($10) to prevent $0 trades
+    positionSize = Math.max(positionSize, 10);
+    
     // Log Kelly calculation for debugging
     logger.debug(`Kelly calculation: price=${price.toFixed(3)}, confidence=${rating.finalScore}%, winProb=${(winProb*100).toFixed(1)}%, kelly=${(kellyFraction*100).toFixed(1)}%, fractional=${(fractionalKelly*100).toFixed(1)}%, size=${formatUSD(positionSize)}`);
     
